@@ -61,6 +61,65 @@ export default function WeeklyUpdate() {
   const [rawIxl, setRawIxl] = useState([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [nameAliases, setNameAliases] = useState({}); // { normalizedRawName: studentId }
+  const [unmatchedNames, setUnmatchedNames] = useState([]); // [{ source, rawName, candidates }]
+  const [lastParsedData, setLastParsedData] = useState(null);
+  const [resolvingAlias, setResolvingAlias] = useState(false);
+
+  // Once a teacher manually resolves a name a screenshot tool didn't
+  // match to anyone on the roster (a Formative account under a parent's
+  // name instead of the student's, say), that fix is remembered here so
+  // it's a one-time correction, not something to redo every week the
+  // same mismatch shows up.
+  useEffect(() => {
+    if (!groupId) return;
+    supabase
+      .from("name_aliases")
+      .select("raw_name, student_id")
+      .eq("group_id", groupId)
+      .then(({ data }) => {
+        const map = {};
+        (data || []).forEach((a) => {
+          map[a.raw_name] = a.student_id;
+        });
+        setNameAliases(map);
+      });
+  }, [groupId]);
+
+  function normalizeAliasKey(s) {
+    return (s || "").toLowerCase().trim();
+  }
+
+  function resolveMatch(rawName, roster, aliasesMap = nameAliases) {
+    const key = normalizeAliasKey(rawName);
+    const aliasedId = aliasesMap[key];
+    if (aliasedId) {
+      const student = roster.find((r) => r.id === aliasedId);
+      if (student) return { match: student, ambiguous: false, candidates: [] };
+    }
+    return fuzzyMatchName(rawName, roster);
+  }
+
+  async function saveAlias(rawName, studentId) {
+    if (!studentId) return;
+    setResolvingAlias(true);
+    try {
+      const key = normalizeAliasKey(rawName);
+      await supabase
+        .from("name_aliases")
+        .upsert({ group_id: groupId, raw_name: key, student_id: studentId }, { onConflict: "group_id,raw_name" });
+      const nextAliases = { ...nameAliases, [key]: studentId };
+      setNameAliases(nextAliases);
+      // Re-run the same parse now that this name resolves -- picks up
+      // the fix without needing separate re-application logic per
+      // screenshot source.
+      if (lastParsedData) buildReviewRows(lastParsedData, nextAliases);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setResolvingAlias(false);
+    }
+  }
 
   const CATEGORY_OPTIONS = [
     { key: "classpoint_stars", label: "⭐ Class Participation (stars — ×5 in Total)", step: 1 },
@@ -271,7 +330,9 @@ export default function WeeklyUpdate() {
     }
   }
 
-  function buildReviewRows(data) {
+  function buildReviewRows(data, aliasesOverride) {
+    const aliasesMap = aliasesOverride || nameAliases;
+    setLastParsedData(data);
     const roster = activeStudents.map((s) => ({ id: s.id, name: s.name }));
     const classpoint = data.classpoint || [];
     const ixl = data.ixl || [];
@@ -282,10 +343,14 @@ export default function WeeklyUpdate() {
     setRawIxl(ixl);
 
     const byStudent = {};
+    const unmatched = [];
 
     classpoint.forEach((row, idx) => {
-      const { match, ambiguous } = fuzzyMatchName(row.name, roster);
-      if (!match) return;
+      const { match, ambiguous, candidates } = resolveMatch(row.name, roster, aliasesMap);
+      if (!match) {
+        unmatched.push({ source: "ClassPoint", rawName: row.name, candidates: candidates || [] });
+        return;
+      }
       const existing = byStudent[match.id] || {};
       // A student should only appear in one session's screenshot per week;
       // if they somehow show up in two, add the stars together rather than
@@ -299,8 +364,11 @@ export default function WeeklyUpdate() {
     });
 
     ixl.forEach((row, idx) => {
-      const { match, ambiguous } = fuzzyMatchName(row.name, roster);
-      if (!match) return;
+      const { match, ambiguous, candidates } = resolveMatch(row.name, roster, aliasesMap);
+      if (!match) {
+        unmatched.push({ source: "IXL", rawName: row.name, candidates: candidates || [] });
+        return;
+      }
       const skills = row.skills || {};
       const values = Object.values(skills).map((v) => Number(v) || 0);
       const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
@@ -319,25 +387,36 @@ export default function WeeklyUpdate() {
     // Assignments field IXL normally fills — already a single percent
     // per student from the source tool, no per-skill averaging needed.
     formative.forEach((row) => {
-      const { match } = fuzzyMatchName(row.name, roster);
-      if (!match) return;
+      const { match, candidates } = resolveMatch(row.name, roster, aliasesMap);
+      if (!match) {
+        unmatched.push({ source: "Formative", rawName: row.name, candidates: candidates || [] });
+        return;
+      }
       byStudent[match.id] = byStudent[match.id] || {};
       byStudent[match.id].ixl_avg = Math.round((Number(row.percent) || 0) * 10) / 10;
     });
     classmarker.forEach((row) => {
-      const { match } = fuzzyMatchName(row.name, roster);
-      if (!match) return;
+      const { match, candidates } = resolveMatch(row.name, roster, aliasesMap);
+      if (!match) {
+        unmatched.push({ source: "ClassMarker", rawName: row.name, candidates: candidates || [] });
+        return;
+      }
       byStudent[match.id] = byStudent[match.id] || {};
       byStudent[match.id].ixl_avg = Math.round((Number(row.percent) || 0) * 10) / 10;
     });
 
     // Kuta Works is an alternate source for Exams.
     kutaworks.forEach((row) => {
-      const { match } = fuzzyMatchName(row.name, roster);
-      if (!match) return;
+      const { match, candidates } = resolveMatch(row.name, roster, aliasesMap);
+      if (!match) {
+        unmatched.push({ source: "Kuta Works", rawName: row.name, candidates: candidates || [] });
+        return;
+      }
       byStudent[match.id] = byStudent[match.id] || {};
       byStudent[match.id].exam_score = Math.round((Number(row.percent) || 0) * 10) / 10;
     });
+
+    setUnmatchedNames(unmatched);
 
     // If this week already exists and already has saved scores (e.g. you
     // logged Notebooking earlier in the week and are now back to add
@@ -691,6 +770,27 @@ export default function WeeklyUpdate() {
         {error && <div className="error-text">{error}</div>}
       </div>
 
+      {unmatchedNames.length > 0 && (
+        <div className="card">
+          <div className="card-title">Unmatched Names — Pick Who This Is</div>
+          <p className="muted" style={{ marginBottom: 10 }}>
+            These names in the screenshots didn't match anyone on the roster — happens when a
+            parent's name shows up on a Formative/ClassMarker account instead of the student's,
+            or a name is spelled differently than on file. Pick the right student once, and it's
+            remembered for every future week — no need to fix the same one again.
+          </p>
+          {unmatchedNames.map((u, i) => (
+            <UnmatchedNameRow
+              key={`${u.source}-${u.rawName}-${i}`}
+              entry={u}
+              students={activeStudents}
+              busy={resolvingAlias}
+              onResolve={(studentId) => saveAlias(u.rawName, studentId)}
+            />
+          ))}
+        </div>
+      )}
+
       {rows && (
         <div className="card">
           <div className="card-title">3. Review Before Saving</div>
@@ -855,5 +955,29 @@ export default function WeeklyUpdate() {
         </div>
       )}
     </>
+  );
+}
+
+function UnmatchedNameRow({ entry, students, busy, onResolve }) {
+  const bestCandidateId = entry.candidates?.[0]?.score > 0.4 ? entry.candidates[0].id : "";
+  const [pick, setPick] = useState(bestCandidateId);
+
+  return (
+    <div className="row" style={{ marginBottom: 8, gap: 10 }}>
+      <span style={{ fontSize: 13.5, minWidth: 130 }}>
+        <span className="muted" style={{ fontSize: 11 }}>{entry.source}:</span> {entry.rawName}
+      </span>
+      <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ minWidth: 180 }}>
+        <option value="">— Not on this roster / skip —</option>
+        {students.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </select>
+      <button className="btn secondary" onClick={() => onResolve(pick)} disabled={!pick || busy}>
+        {busy ? "Saving…" : "Save & Remember"}
+      </button>
+    </div>
   );
 }

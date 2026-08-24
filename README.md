@@ -781,6 +781,20 @@ design, not as a gap.
 
 ## Notes / things you may want to adjust
 
+- **Name mismatches in screenshot imports are now a one-time fix, not a
+  weekly one.** If a name in a ClassPoint/IXL/Formative/ClassMarker/Kuta
+  Works screenshot doesn't match anyone on the roster -- most commonly a
+  parent's name showing up on a Formative or ClassMarker account instead
+  of the student's -- it no longer gets silently dropped. Weekly Update
+  shows an **"Unmatched Names — Pick Who This Is"** card above the review
+  table: pick the right student once, click **Save & Remember**, and
+  that mapping is saved to the new `name_aliases` table (one per Level,
+  keyed by the exact raw name text). Every future week, that same
+  mismatched name resolves automatically before fuzzy matching even
+  runs -- a teacher's past correction is always trusted over a fresh
+  guess. Lives in `WeeklyUpdate.jsx` (`resolveMatch`, `saveAlias`) and
+  `supabase/schema.sql` (`name_aliases` table).
+
 - **"Find a Student"** (top of Overview) searches every student across
   every Level at once, not just whichever one is currently selected --
   useful once you're running enough Levels that remembering which class

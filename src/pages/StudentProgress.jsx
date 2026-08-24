@@ -505,6 +505,40 @@ export default function StudentProgress() {
         {streakInfo.usedFreeze && <p className="muted">❄️ A missed week was covered by your streak freeze.</p>}
       </div>
 
+      <div className="card no-print">
+        <div className="card-title">Ways to Climb Higher</div>
+        <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+          {pendingCatchUps.length > 0 && (
+            <li>
+              <strong>
+                Finish {pendingCatchUps.length === 1 ? "the task" : `${pendingCatchUps.length} tasks`} left
+                over from last week
+              </strong>{" "}
+              — that's usually the fastest way to catch up.
+            </li>
+          )}
+          {myGoal && !myGoal.achieved && (
+            <li>
+              Hit your own goal: {myGoal.remaining} more {GOAL_METRIC_LABEL[myGoal.metric].toLowerCase()}.
+            </li>
+          )}
+          {catchUpLine && <li>{catchUpLine}</li>}
+          {myEntry && Number(myEntry.ixl_avg) < 100 && (
+            <li>
+              Finish up your Weekly Assignments — you're at {Number(myEntry.ixl_avg).toFixed(0)}% so far
+              this week.
+            </li>
+          )}
+          {!isSuperstarThisWeek && (
+            <li>Score a perfect 100% on Weekly Assignments this week to become a Superstar.</li>
+          )}
+          {myAssignments.length > 0 && (
+            <li>Complete a task below for up to {maxTaskPoints} bonus points once approved.</li>
+          )}
+          {streakInfo.streak > 0 && <li>Keep showing up each week to grow your 🔥 streak.</li>}
+        </ul>
+      </div>
+
       {myAssignments.length > 0 && (
         <div className="card no-print">
           <div className="card-title">This Week's Tasks</div>

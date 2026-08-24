@@ -301,6 +301,28 @@ create policy "authenticated read/write task_submissions" on task_submissions
 -- the PIN against server-side.
 revoke select (parent_token, parent_pin, parent_pin_attempts, parent_pin_locked_until, student_token) on students from anon, authenticated;
 
+-- Persistent name-matching memory: once a teacher manually resolves a
+-- screenshot name that didn't match anyone on the roster (a parent's
+-- name on a Formative account instead of the student's, a nickname, a
+-- consistent typo in how a third-party tool spells someone), that
+-- correction is remembered here -- so it's a one-time fix, not something
+-- to redo every single week the same mismatch shows up. Checked BEFORE
+-- fuzzy name matching runs, and wins over it when present, since a
+-- teacher's explicit correction is always more trustworthy than a guess.
+create table if not exists name_aliases (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid references groups(id) on delete cascade,
+  raw_name text not null, -- normalized (lowercased, trimmed) as it appeared in the screenshot
+  student_id uuid references students(id) on delete cascade,
+  created_at timestamptz default now(),
+  unique (group_id, raw_name)
+);
+
+alter table name_aliases enable row level security;
+drop policy if exists "authenticated manage name_aliases" on name_aliases;
+create policy "authenticated manage name_aliases" on name_aliases
+  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
 -- Score-edit audit trail: a running log of every change to a saved
 -- entry, for the "why did my kid's score change" conversation. This is
 -- a database trigger rather than something each save path in the app

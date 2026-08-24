@@ -546,8 +546,14 @@ export default function MyProgress() {
                 </li>
               )}
               {catchUpLine && <li>{catchUpLine}</li>}
+              {myEntry && Number(myEntry.ixl_avg) < 100 && (
+                <li>
+                  Finish up your Weekly Assignments — you're at {Number(myEntry.ixl_avg).toFixed(0)}%
+                  so far this week.
+                </li>
+              )}
               {!isSuperstarThisWeek && (
-                <li>Score a perfect 100% IXL average this week to become a Superstar.</li>
+                <li>Score a perfect 100% on Weekly Assignments this week to become a Superstar.</li>
               )}
               {myAssignments.length > 0 && (
                 <li>Complete a task below for up to {maxTaskPoints} bonus points once approved.</li>
