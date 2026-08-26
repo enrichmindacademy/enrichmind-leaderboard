@@ -98,7 +98,7 @@ export default function MyProgress() {
 
   const myRankIndex = rankRows.findIndex((r) => r.student.id === studentId);
   const myRow = rankRows[myRankIndex];
-  const streakInfo = studentId ? computeStreak(entriesByWeek, weeks, studentId) : { streak: 0 };
+  const streakInfo = studentId ? computeStreak(entriesByWeek, weeks, studentId, peerStudents) : { streak: 0 };
 
   const divisions = latestWeekId
     ? assignDivisions(entriesByWeek, weeks, peerStudents, latestWeekId)
@@ -354,6 +354,12 @@ export default function MyProgress() {
             {newBest && (
               <p style={{ color: "#c9891f", fontWeight: 700, marginTop: 12 }}>
                 🏆 New personal best this week!
+              </p>
+            )}
+            {myDivision?.growthBonus > 0 && (
+              <p className="muted" style={{ marginTop: 12 }}>
+                Includes a +{myDivision.growthBonus.toFixed(1)}% boost this week for beating your
+                own recent average.
               </p>
             )}
             {isSuperstarThisWeek && (

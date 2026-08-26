@@ -1,9 +1,28 @@
 import { useState, useEffect } from "react";
 import { useGroup } from "../lib/GroupContext";
 import { supabase } from "../supabaseClient";
+
+// You're usually catching up on last week's scores, not literally
+// today's, so the default week label reflects that instead of always
+// landing on today's date -- one less thing to notice and fix before
+// every entry session.
+function lastWeekLabel() {
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  return `Week of ${d.toLocaleDateString()}`;
+}
 import { fuzzyMatchName } from "../lib/fuzzyMatch";
 import { buildAutoAssignments } from "../lib/autoAssign";
 import PasteZone from "../components/PasteZone";
+import CsvDropZone from "../components/CsvDropZone";
+import {
+  parseKutaWorksCsv,
+  parseIxlScoreGrid,
+  expandAssignedCodes,
+  averagesForCodes,
+  parseFormativeCsv,
+  adaptFormativeRowsForReview,
+} from "../lib/scoreImport";
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -15,6 +34,15 @@ function fileToBase64(file) {
     };
     reader.onerror = reject;
     reader.readAsDataURL(file);
+  });
+}
+
+function fileToText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsText(file);
   });
 }
 
@@ -33,8 +61,10 @@ const MULTIPLIER_OPTIONS = [1, 1.5, 2];
 const NO_SESSION_KEY = "__main__";
 
 export default function WeeklyUpdate() {
-  const { students, sessions, weeks, tasks, assignments, submissions, entriesByWeek, reload, groupId } = useGroup();
+  const { students, sessions, weeks, tasks, assignments, submissions, entriesByWeek, reload, groupId, groups } =
+    useGroup();
   const activeStudents = students.filter((s) => s.active);
+  const currentGroupName = groups?.find((g) => g.id === groupId)?.name || "";
 
   // One ClassPoint upload slot per session (or a single slot if this level
   // has no separate sessions). A student can attend either session, so
@@ -45,15 +75,21 @@ export default function WeeklyUpdate() {
       ? sessions.map((s) => ({ key: s.id, label: s.label }))
       : [{ key: NO_SESSION_KEY, label: null }];
 
-  const [weekLabel, setWeekLabel] = useState(`Week of ${new Date().toLocaleDateString()}`);
+  const [weekLabel, setWeekLabel] = useState(lastWeekLabel());
   const [skillsAssigned, setSkillsAssigned] = useState("");
   const [multiplier, setMultiplier] = useState(1);
   const [classpointFiles, setClasspointFiles] = useState({}); // { [slotKey]: File }
   const [ixlFile, setIxlFile] = useState(null);
+  const [ixlCsvFile, setIxlCsvFile] = useState(null);
+  const [ixlMode, setIxlMode] = useState("csv"); // "csv" (recommended) or "screenshot"
   const [ixlDestination, setIxlDestination] = useState("ixl_avg"); // "ixl_avg" (Assignments) or "exam_score" (Exams)
   const [formativeFile, setFormativeFile] = useState(null);
+  const [formativeCsvFile, setFormativeCsvFile] = useState(null);
+  const [formativeMode, setFormativeMode] = useState("csv");
   const [classmarkerFile, setClassmarkerFile] = useState(null);
   const [kutaworksFile, setKutaworksFile] = useState(null);
+  const [kutaworksCsvFile, setKutaworksCsvFile] = useState(null);
+  const [kutaworksMode, setKutaworksMode] = useState("csv");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [rows, setRows] = useState(null); // review rows, one per active student
@@ -62,27 +98,38 @@ export default function WeeklyUpdate() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [nameAliases, setNameAliases] = useState({}); // { normalizedRawName: studentId }
-  const [unmatchedNames, setUnmatchedNames] = useState([]); // [{ source, rawName, candidates }]
+  const [externalAliases, setExternalAliases] = useState({}); // { "source::externalId": studentId }
+  const [unmatchedNames, setUnmatchedNames] = useState([]); // [{ source, rawName, candidates, externalSource?, externalId? }]
   const [lastParsedData, setLastParsedData] = useState(null);
   const [resolvingAlias, setResolvingAlias] = useState(false);
 
-  // Once a teacher manually resolves a name a screenshot tool didn't
+  // Once a teacher manually resolves a name a screenshot/CSV tool didn't
   // match to anyone on the roster (a Formative account under a parent's
   // name instead of the student's, say), that fix is remembered here so
   // it's a one-time correction, not something to redo every week the
-  // same mismatch shows up.
+  // same mismatch shows up. Two lookup paths come out of the same table:
+  // raw_name (the original, for screenshot sources and as a fallback),
+  // and source+external_id (for CSV sources with a stable account ID --
+  // currently Formative's Student ID) -- the ID path wins when present,
+  // since it survives a display-name change that would break raw_name
+  // matching.
   useEffect(() => {
     if (!groupId) return;
     supabase
       .from("name_aliases")
-      .select("raw_name, student_id")
+      .select("raw_name, student_id, source, external_id")
       .eq("group_id", groupId)
       .then(({ data }) => {
-        const map = {};
+        const nameMap = {};
+        const externalMap = {};
         (data || []).forEach((a) => {
-          map[a.raw_name] = a.student_id;
+          nameMap[a.raw_name] = a.student_id;
+          if (a.source && a.external_id) {
+            externalMap[`${a.source}::${a.external_id}`] = a.student_id;
+          }
         });
-        setNameAliases(map);
+        setNameAliases(nameMap);
+        setExternalAliases(externalMap);
       });
   }, [groupId]);
 
@@ -90,7 +137,11 @@ export default function WeeklyUpdate() {
     return (s || "").toLowerCase().trim();
   }
 
-  function resolveMatch(rawName, roster, aliasesMap = nameAliases) {
+  function resolveMatch(rawName, roster, aliasesMap = nameAliases, externalMap = externalAliases, externalKey = null) {
+    if (externalKey && externalMap[externalKey]) {
+      const student = roster.find((r) => r.id === externalMap[externalKey]);
+      if (student) return { match: student, ambiguous: false, candidates: [] };
+    }
     const key = normalizeAliasKey(rawName);
     const aliasedId = aliasesMap[key];
     if (aliasedId) {
@@ -100,20 +151,36 @@ export default function WeeklyUpdate() {
     return fuzzyMatchName(rawName, roster);
   }
 
-  async function saveAlias(rawName, studentId) {
+  // `identity` is optional -- { source, externalId } -- present only when
+  // resolving a CSV row that carries a stable account ID (Formative).
+  // When given, the alias is saved keyed on that ID (surviving a future
+  // display-name change) in addition to the raw name; screenshot-sourced
+  // corrections keep working exactly as before with no identity at all.
+  async function saveAlias(rawName, studentId, identity) {
     if (!studentId) return;
     setResolvingAlias(true);
     try {
       const key = normalizeAliasKey(rawName);
-      await supabase
-        .from("name_aliases")
-        .upsert({ group_id: groupId, raw_name: key, student_id: studentId }, { onConflict: "group_id,raw_name" });
+      const payload = { group_id: groupId, raw_name: key, student_id: studentId };
+      let conflictTarget = "group_id,raw_name";
+      if (identity?.source && identity?.externalId) {
+        payload.source = identity.source;
+        payload.external_id = identity.externalId;
+        conflictTarget = "group_id,source,external_id";
+      }
+      await supabase.from("name_aliases").upsert(payload, { onConflict: conflictTarget });
+
       const nextAliases = { ...nameAliases, [key]: studentId };
       setNameAliases(nextAliases);
-      // Re-run the same parse now that this name resolves -- picks up
-      // the fix without needing separate re-application logic per
-      // screenshot source.
-      if (lastParsedData) buildReviewRows(lastParsedData, nextAliases);
+      let nextExternal = externalAliases;
+      if (identity?.source && identity?.externalId) {
+        nextExternal = { ...externalAliases, [`${identity.source}::${identity.externalId}`]: studentId };
+        setExternalAliases(nextExternal);
+      }
+      // Re-run the same parse now that this name/identity resolves --
+      // picks up the fix without needing separate re-application logic
+      // per source.
+      if (lastParsedData) buildReviewRows(lastParsedData, nextAliases, nextExternal);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -276,15 +343,40 @@ export default function WeeklyUpdate() {
         });
       }
 
+      // IXL: CSV mode parses the real Score Grid export deterministically
+      // (no vision model, no per-week AI call) -- the skills-assigned text
+      // box above is reused as-is, just matched against the export's own
+      // real codes ("GG.9") instead of the shorthand a screenshot forced
+      // us to invent. Screenshot mode stays available as a fallback.
       let ixlRows = [];
-      if (ixlFile) {
+      if (ixlMode === "csv" && ixlCsvFile) {
+        const text = await fileToText(ixlCsvFile);
+        const grid = parseIxlScoreGrid(text);
+        const availableCodes = grid.skills.map((s) => s.code);
+        const codes = expandAssignedCodes(skillsAssigned, availableCodes);
+        if (codes.length === 0) {
+          throw new Error(
+            `No skill codes from "${skillsAssigned}" were found in this IXL export. Double-check the codes ` +
+              `against the export (e.g. "GG.7-9, GG.10") -- CSV mode needs the real codes, not the old screenshot shorthand.`
+          );
+        }
+        ixlRows = averagesForCodes(grid, codes);
+      } else if (ixlFile) {
         const ixlImage = await fileToBase64(ixlFile);
         const data = await callParseFunction({ ixlImage, skillsAssigned, rosterNames });
         ixlRows = data.ixl || [];
       }
 
+      // Formative: CSV mode carries the account's stable Student ID/email
+      // through so a mismatch only ever needs resolving once, even if the
+      // display name is a parent's and changes between exports -- see
+      // adaptFormativeRowsForReview() and the externalId handling below.
       let formativeRows = [];
-      if (formativeFile) {
+      if (formativeMode === "csv" && formativeCsvFile) {
+        const text = await fileToText(formativeCsvFile);
+        const parsed = parseFormativeCsv(text);
+        formativeRows = adaptFormativeRowsForReview(parsed, currentGroupName);
+      } else if (formativeFile) {
         const formativeImage = await fileToBase64(formativeFile);
         const data = await callParseFunction({ formativeImage, rosterNames });
         formativeRows = data.formative || [];
@@ -297,8 +389,19 @@ export default function WeeklyUpdate() {
         classmarkerRows = data.classmarker || [];
       }
 
+      // Kuta Works: CSV mode reads the real export directly -- names come
+      // through as "First Last" already (the screenshot prompt's assumed
+      // reversal was wrong for this export), and an in-progress/scheduled
+      // column is excluded from that student's row entirely rather than
+      // parsed as a 0.
       let kutaworksRows = [];
-      if (kutaworksFile) {
+      if (kutaworksMode === "csv" && kutaworksCsvFile) {
+        const text = await fileToText(kutaworksCsvFile);
+        const parsed = parseKutaWorksCsv(text);
+        kutaworksRows = parsed.students
+          .filter((s) => s.percent !== null)
+          .map((s) => ({ name: s.name, percent: s.percent }));
+      } else if (kutaworksFile) {
         const kutaworksImage = await fileToBase64(kutaworksFile);
         const data = await callParseFunction({ kutaworksImage, rosterNames });
         kutaworksRows = data.kutaworks || [];
@@ -330,8 +433,9 @@ export default function WeeklyUpdate() {
     }
   }
 
-  function buildReviewRows(data, aliasesOverride) {
+  function buildReviewRows(data, aliasesOverride, externalAliasesOverride) {
     const aliasesMap = aliasesOverride || nameAliases;
+    const externalMap = externalAliasesOverride || externalAliases;
     setLastParsedData(data);
     const roster = activeStudents.map((s) => ({ id: s.id, name: s.name }));
     const classpoint = data.classpoint || [];
@@ -386,10 +490,25 @@ export default function WeeklyUpdate() {
     // Formative and ClassMarker are alternate sources for the same
     // Assignments field IXL normally fills — already a single percent
     // per student from the source tool, no per-skill averaging needed.
+    //
+    // Formative rows from CSV mode carry a stable externalId (Formative's
+    // own Student ID) -- resolveMatch checks that FIRST, before the raw
+    // display name, since the name alone can be a parent's account and
+    // isn't trustworthy as a match key on its own.
     formative.forEach((row) => {
-      const { match, candidates } = resolveMatch(row.name, roster, aliasesMap);
+      const externalKey = row.externalId ? `formative::${row.externalId}` : null;
+      const { match, candidates } = resolveMatch(row.name, roster, aliasesMap, externalMap, externalKey);
       if (!match) {
-        unmatched.push({ source: "Formative", rawName: row.name, candidates: candidates || [] });
+        unmatched.push({
+          source: "Formative",
+          rawName: row.name,
+          candidates: candidates || [],
+          externalSource: row.externalId ? "formative" : null,
+          externalId: row.externalId || null,
+          hint: row.externalId
+            ? "Logged into Formative under this name/email — confirm which real student this is."
+            : null,
+        });
         return;
       }
       byStudent[match.id] = byStudent[match.id] || {};
@@ -657,7 +776,7 @@ export default function WeeklyUpdate() {
               value={weeks.some((w) => w.label === weekLabel) ? weekLabel : "__new__"}
               onChange={(e) => {
                 if (e.target.value === "__new__") {
-                  onWeekLabelChange(`Week of ${new Date().toLocaleDateString()}`);
+                  onWeekLabelChange(lastWeekLabel());
                 } else {
                   onWeekLabelChange(e.target.value);
                 }
@@ -729,17 +848,23 @@ export default function WeeklyUpdate() {
           Assignments — use whichever tool you actually assigned this week
         </div>
         <div className="row" style={{ marginBottom: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-          <div>
-            <PasteZone label="IXL score report screenshot" file={ixlFile} onChange={setIxlFile} />
+          <div style={{ minWidth: 260 }}>
+            <SourceModeToggle mode={ixlMode} onChange={setIxlMode} csvLabel="CSV export (recommended)" />
+            {ixlMode === "csv" ? (
+              <CsvDropZone label="IXL Score Grid export (.csv)" file={ixlCsvFile} onChange={setIxlCsvFile} />
+            ) : (
+              <PasteZone label="IXL score report screenshot" file={ixlFile} onChange={setIxlFile} />
+            )}
             <label className="muted" style={{ display: "block", marginTop: 8 }}>
-              Skills assigned this week (e.g. "F1, 3, 4, 5, I 1, 7") — only used to read the
-              IXL report correctly, doesn't affect ClassPoint
+              {ixlMode === "csv"
+                ? 'Skills assigned this week (e.g. "GG.7-9, GG.10" — the real codes from the export, not shorthand)'
+                : 'Skills assigned this week (e.g. "F1, 3, 4, 5, I 1, 7") — only used to read the IXL report correctly'}
             </label>
             <input
               style={{ width: "100%", marginTop: 4 }}
               value={skillsAssigned}
               onChange={(e) => setSkillsAssigned(e.target.value)}
-              placeholder="F1, 3, 4, 5, I 1, 7"
+              placeholder={ixlMode === "csv" ? "GG.7-9, GG.10" : "F1, 3, 4, 5, I 1, 7"}
             />
             <label className="muted" style={{ display: "block", marginTop: 8 }}>
               This IXL report counts toward
@@ -753,19 +878,45 @@ export default function WeeklyUpdate() {
               <option value="exam_score">Exams</option>
             </select>
           </div>
-          <PasteZone label="Formative results screenshot" file={formativeFile} onChange={setFormativeFile} />
+
+          <div style={{ minWidth: 260 }}>
+            <SourceModeToggle mode={formativeMode} onChange={setFormativeMode} csvLabel="CSV export (recommended)" />
+            {formativeMode === "csv" ? (
+              <>
+                <CsvDropZone label="Formative export (.csv)" file={formativeCsvFile} onChange={setFormativeCsvFile} />
+                <p className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+                  Matches by the student's Formative account, not the display name — safe even if
+                  a parent's name shows up instead of the student's.
+                </p>
+              </>
+            ) : (
+              <PasteZone label="Formative results screenshot" file={formativeFile} onChange={setFormativeFile} />
+            )}
+          </div>
+
           <PasteZone label="ClassMarker results screenshot" file={classmarkerFile} onChange={setClassmarkerFile} />
         </div>
 
         <div className="rowlabel" style={{ marginBottom: 8 }}>
           Exams — IXL (toggle above) or Kuta Works
         </div>
-        <div className="row" style={{ marginBottom: 14, flexWrap: "wrap" }}>
-          <PasteZone label="Kuta Works results screenshot" file={kutaworksFile} onChange={setKutaworksFile} />
+        <div className="row" style={{ marginBottom: 14, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <div style={{ minWidth: 260 }}>
+            <SourceModeToggle mode={kutaworksMode} onChange={setKutaworksMode} csvLabel="CSV export (recommended)" />
+            {kutaworksMode === "csv" ? (
+              <CsvDropZone
+                label="Kuta Works results export (.csv)"
+                file={kutaworksCsvFile}
+                onChange={setKutaworksCsvFile}
+              />
+            ) : (
+              <PasteZone label="Kuta Works results screenshot" file={kutaworksFile} onChange={setKutaworksFile} />
+            )}
+          </div>
         </div>
 
         <button className="btn" onClick={handleParse} disabled={busy}>
-          {busy ? "Reading screenshots…" : "Extract Data"}
+          {busy ? "Reading files…" : "Extract Data"}
         </button>
         {error && <div className="error-text">{error}</div>}
       </div>
@@ -785,7 +936,13 @@ export default function WeeklyUpdate() {
               entry={u}
               students={activeStudents}
               busy={resolvingAlias}
-              onResolve={(studentId) => saveAlias(u.rawName, studentId)}
+              onResolve={(studentId) =>
+                saveAlias(
+                  u.rawName,
+                  studentId,
+                  u.externalSource && u.externalId ? { source: u.externalSource, externalId: u.externalId } : undefined
+                )
+              }
             />
           ))}
         </div>
@@ -958,26 +1115,65 @@ export default function WeeklyUpdate() {
   );
 }
 
+// Small CSV-vs-screenshot switch shown above a source's input. Defaults
+// to CSV wherever a real export exists (IXL, Formative, Kuta Works) --
+// deterministic parsing beats a vision model reading a picture, and costs
+// nothing per week to run. Screenshot stays one click away for whichever
+// week a real export isn't handy.
+function SourceModeToggle({ mode, onChange, csvLabel = "CSV export" }) {
+  // Same "unselected option gets .secondary" convention the multiplier
+  // picker above already uses, rather than introducing a new .active
+  // class with no matching CSS rule outside nav tabs/sidebar links.
+  return (
+    <div className="row" style={{ gap: 6, marginBottom: 6 }}>
+      <button
+        type="button"
+        className={`btn ${mode === "csv" ? "" : "secondary"}`}
+        style={{ padding: "3px 10px", fontSize: 11.5 }}
+        onClick={() => onChange("csv")}
+      >
+        {csvLabel}
+      </button>
+      <button
+        type="button"
+        className={`btn ${mode === "screenshot" ? "" : "secondary"}`}
+        style={{ padding: "3px 10px", fontSize: 11.5 }}
+        onClick={() => onChange("screenshot")}
+      >
+        Screenshot
+      </button>
+    </div>
+  );
+}
+
 function UnmatchedNameRow({ entry, students, busy, onResolve }) {
   const bestCandidateId = entry.candidates?.[0]?.score > 0.4 ? entry.candidates[0].id : "";
   const [pick, setPick] = useState(bestCandidateId);
 
   return (
-    <div className="row" style={{ marginBottom: 8, gap: 10 }}>
-      <span style={{ fontSize: 13.5, minWidth: 130 }}>
-        <span className="muted" style={{ fontSize: 11 }}>{entry.source}:</span> {entry.rawName}
-      </span>
-      <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ minWidth: 180 }}>
-        <option value="">— Not on this roster / skip —</option>
-        {students.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
-      <button className="btn secondary" onClick={() => onResolve(pick)} disabled={!pick || busy}>
-        {busy ? "Saving…" : "Save & Remember"}
-      </button>
+    <div style={{ marginBottom: 8 }}>
+      <div className="row" style={{ gap: 10 }}>
+        <span style={{ fontSize: 13.5, minWidth: 130 }}>
+          <span className="muted" style={{ fontSize: 11 }}>{entry.source}:</span> {entry.rawName}
+        </span>
+        <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ minWidth: 180 }}>
+          <option value="">— Not on this roster / skip —</option>
+          {students.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <button className="btn secondary" onClick={() => onResolve(pick)} disabled={!pick || busy}>
+          {busy ? "Saving…" : "Save & Remember"}
+        </button>
+      </div>
+      {entry.hint && (
+        <p className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+          {entry.hint} This is remembered by their Formative account, not just this name — it'll
+          keep matching even if the display name changes later.
+        </p>
+      )}
     </div>
   );
 }

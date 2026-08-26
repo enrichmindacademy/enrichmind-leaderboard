@@ -15,6 +15,7 @@ import Insights from "./pages/Insights";
 import Roster from "./pages/Roster";
 import History from "./pages/History";
 import ParentApproval from "./pages/ParentApproval";
+import FamilyPortal from "./pages/FamilyPortal";
 import StudentProgress from "./pages/StudentProgress";
 
 const DAY_ORDER = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
@@ -157,6 +158,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/parent/:token" element={<ParentApproval />} />
+        <Route path="/family/:token" element={<FamilyPortal />} />
         <Route path="/student/:token" element={<StudentProgress />} />
         <Route path="/*" element={<GatedApp />} />
       </Routes>

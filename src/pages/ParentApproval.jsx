@@ -260,7 +260,7 @@ export default function ParentApproval() {
   const myDivision = latestWeekId
     ? assignDivisions(entriesByWeek, weeks, peers, latestWeekId).find((d) => d.student.id === student?.id)
     : null;
-  const streakInfo = student ? computeStreak(entriesByWeek, weeks, student.id) : { streak: 0 };
+  const streakInfo = student ? computeStreak(entriesByWeek, weeks, student.id, peers) : { streak: 0 };
   const myTotal = latestWeekId && student ? effectiveTotal(entriesByWeek, weeks, latestWeekId, student.id) : null;
   const myTrailingAvg =
     latestWeekId && student ? trailingAverage(entriesByWeek, weeks, student.id, latestWeekId) : null;

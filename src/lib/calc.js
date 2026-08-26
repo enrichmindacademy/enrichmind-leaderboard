@@ -88,22 +88,35 @@ export function computeGrowthForWeek(entriesByWeek, weeks, currentWeekId, studen
 // that run is forgiven automatically (a built-in "streak freeze"), so a
 // single absence doesn't wipe out weeks of consistency — but two misses
 // in a row (or a second miss) ends it.
-export function computeStreak(entriesByWeek, weeks, studentId) {
+const STREAK_THRESHOLD = 95; // % -- a week only counts toward the streak at this composite score or higher
+
+// A streak now means "consistently scoring well," not just "showed up
+// with SOME entry." A week counts only if that student's composite
+// percentage for it (the same number Diamond/Gold/Silver is judged
+// against) hit STREAK_THRESHOLD or higher -- an entry that exists but
+// scored low doesn't extend the streak any more than no entry at all
+// does. The one-week grace/freeze still applies the same way either
+// way: whether a week is missing entirely or just fell short of the
+// bar, it's forgiven once before the streak actually breaks.
+export function computeStreak(entriesByWeek, weeks, studentId, students) {
   const weekIds = weeks.map((w) => w.id);
   let streak = 0;
   let grace = GRACE_WEEKS;
   let usedFreeze = false;
 
   for (let i = weekIds.length - 1; i >= 0; i--) {
-    const has = !!entriesByWeek[weekIds[i]]?.[studentId];
-    if (has) {
+    const hasEntry = !!entriesByWeek[weekIds[i]]?.[studentId];
+    const pct = hasEntry ? weeklyCompositePercentages(entriesByWeek, weeks, weekIds[i], students).get(studentId) : null;
+    const qualifies = pct !== null && pct >= STREAK_THRESHOLD;
+
+    if (qualifies) {
       streak += 1;
       continue;
     }
     if (grace > 0) {
       grace -= 1;
       usedFreeze = true;
-      continue; // missed week forgiven, keep walking back
+      continue; // a missing or below-bar week, forgiven once, keep walking back
     }
     break;
   }
@@ -320,11 +333,12 @@ export function taskCompletionRateForWeek(assignments, submissions, weekId) {
   return (approvedCount / weekAssignments.length) * 100;
 }
 
-// Computes every active student's composite percentage for ONE week --
-// the number Diamond/Gold/Silver is actually judged against. Returns a
-// Map<studentId, percentage|null> (null = no entry at all that week, so
-// there's nothing to grade them on).
-export function weeklyCompositePercentages(entriesByWeek, weeks, weekId, students) {
+// Computes every active student's BASE composite percentage for ONE
+// week -- everything weeklyCompositePercentages() below does, MINUS the
+// growth bonus. Split out as its own function so the growth bonus (which
+// needs to look at PAST weeks' percentages) has something non-circular to
+// compare against -- see the comment above growthBonusForWeek().
+function basePercentageForWeek(entriesByWeek, weekId, students) {
   const weekEntries = entriesByWeek[weekId] || {};
   const result = new Map();
 
@@ -401,6 +415,75 @@ export function weeklyCompositePercentages(entriesByWeek, weeks, weekId, student
   return result;
 }
 
+// Growth bonus: a small, capped nudge added on top of the base composite
+// percentage when a student beats their own recent average -- NOT a
+// reweighting of League scoring (a 40/30/20/10-style formula that folds
+// growth in as a large weighted component was considered and rejected:
+// growth is `thisWeek - ownTrailingAverage`, so a student already
+// scoring ~100% every week has a trailing average near 100 and near-zero
+// growth -- weighting that heavily into League placement would
+// structurally cap consistent high performers out of Diamond, punishing
+// the exact students already carrying the least room to "improve." This
+// is the same ceiling problem isSuperstarWeek()/superstarStandings()
+// already exist to solve for the separate Growth board -- folding a big
+// growth weight into League would just reintroduce it there too).
+//
+// So this stays deliberately small and strictly non-negative: it can
+// only ever add, never subtract, and it's capped (same order of
+// magnitude as PARTICIPATION_WEIGHT) so one strong week can't manufacture
+// Diamond out of an otherwise weak base on its own. A ceiling student
+// gets a bonus near 0 -- never a penalty for having nowhere left to grow.
+//
+// Compares against basePercentageForWeek() (not the final, already-
+// growth-bonused percentage) for past weeks -- comparing against a
+// bonused history would make each week's bonus depend on the bonuses
+// before it, which is both a feedback loop and, at real class-year scale,
+// an exponential amount of recomputation. Comparing against the base
+// avoids both.
+const GROWTH_BONUS_CAP = 8; // percentage points, tunable here
+const GROWTH_BONUS_SPAN = 4; // weeks of trailing history compared against -- same span the Growth view already uses
+
+function trailingBasePercentageAverage(entriesByWeek, weeks, studentId, excludeWeekId, students, span = GROWTH_BONUS_SPAN) {
+  const weekIds = weeks.map((w) => w.id);
+  const idx = weekIds.indexOf(excludeWeekId);
+  const priorWeekIds = weekIds.slice(Math.max(0, idx - span), idx);
+  const values = priorWeekIds
+    .map((wid) => basePercentageForWeek(entriesByWeek, wid, students).get(studentId))
+    .filter((v) => typeof v === "number");
+  if (values.length === 0) return null;
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+// Exported so the UI can show WHY a student's percentage is what it is
+// ("+3.2% for beating your own average this week") instead of the growth
+// bonus being an invisible adjustment baked silently into the number.
+export function growthBonusForWeek(entriesByWeek, weeks, weekId, studentId, students) {
+  const base = basePercentageForWeek(entriesByWeek, weekId, students).get(studentId);
+  if (base === null || base === undefined) return 0;
+  const trailingAvg = trailingBasePercentageAverage(entriesByWeek, weeks, studentId, weekId, students);
+  if (trailingAvg === null) return 0; // no history yet (new student / first tracked week) -- nothing to compare against, no bonus either way
+  return Math.max(0, Math.min(GROWTH_BONUS_CAP, base - trailingAvg));
+}
+
+// Computes every active student's composite percentage for ONE week --
+// the number Diamond/Gold/Silver is actually judged against. Returns a
+// Map<studentId, percentage|null> (null = no entry at all that week, so
+// there's nothing to grade them on).
+export function weeklyCompositePercentages(entriesByWeek, weeks, weekId, students) {
+  const base = basePercentageForWeek(entriesByWeek, weekId, students);
+  const result = new Map();
+  students.forEach((s) => {
+    const b = base.get(s.id);
+    if (b === null || b === undefined) {
+      result.set(s.id, b ?? null);
+      return;
+    }
+    const bonus = growthBonusForWeek(entriesByWeek, weeks, weekId, s.id, students);
+    result.set(s.id, Math.min(100, b + bonus));
+  });
+  return result;
+}
+
 // Splits active students into Diamond/Gold/Silver by an ABSOLUTE bar --
 // each student's own composite percentage this week, not by rank
 // against classmates. Everyone can be Diamond in a great week; everyone
@@ -413,7 +496,9 @@ export function assignDivisions(entriesByWeek, weeks, students, currentWeekId) {
     .map((s) => {
       const pct = percentages.get(s.id);
       const tierIndex = pct === null ? 2 : pct >= DIAMOND_CUTOFF ? 0 : pct >= GOLD_CUTOFF ? 1 : 2;
-      return { student: s, standing: pct, tierIndex, tierName: DIVISION_NAMES[tierIndex] };
+      const growthBonus =
+        pct === null ? 0 : growthBonusForWeek(entriesByWeek, weeks, currentWeekId, s.id, students);
+      return { student: s, standing: pct, tierIndex, tierName: DIVISION_NAMES[tierIndex], growthBonus };
     })
     .sort((a, b) => (b.standing ?? -1) - (a.standing ?? -1) || a.student.name.localeCompare(b.student.name));
 }

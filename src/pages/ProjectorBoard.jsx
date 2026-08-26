@@ -168,7 +168,7 @@ export default function ProjectorBoard() {
     return computeGrowthForWeek(entriesByWeek, weeks, latestWeekId, sessionScopedStudents)
       .map((r) => ({
         ...r,
-        streakInfo: computeStreak(entriesByWeek, weeks, r.student.id),
+        streakInfo: computeStreak(entriesByWeek, weeks, r.student.id, sessionScopedStudents),
         superstars: superstarCount(entriesByWeek, weeks, r.student.id),
       }))
       .filter((r) => r.currentTotal !== null);
@@ -661,6 +661,15 @@ function DivisionView({
                     {change === "up" && <span title="Promoted">⬆️</span>}
                     {change === "down" && <span title="Relegated">⬇️</span>}
                     <GrowthPill growth={growthInfo?.growth} />
+                    {r.growthBonus > 0 && (
+                      <span
+                        className="pill growth-pos"
+                        title="Added to this week's percentage for beating your own recent average"
+                        style={{ fontSize: 11 }}
+                      >
+                        +{r.growthBonus.toFixed(1)}% growth
+                      </span>
+                    )}
                     <div className="total-score">{r.weekTotal.toFixed(1)}</div>
                     <ScoreControls
                       studentId={r.student.id}

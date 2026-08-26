@@ -198,12 +198,36 @@ export default function Roster() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not fetch parent link.");
       const url = `${window.location.origin}/parent/${data.token}`;
-      try {
-        await navigator.clipboard.writeText(url);
-        alert(`Parent link copied for ${student.name}.`);
-      } catch {
-        prompt("Copy this link:", url);
-      }
+      // Clipboard writes after an awaited fetch can silently fail in some
+      // browsers (they only allow it within a short window of the actual
+      // click) -- rather than trust that "no error was thrown" means it
+      // actually worked, always show the link in a selectable prompt too,
+      // so there's a guaranteed way to grab it either way.
+      navigator.clipboard?.writeText(url).catch(() => {});
+      prompt(`Parent link for ${student.name} (also attempted to copy automatically):`, url);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  // Unlike copyParentLink (one link per class enrollment), this one's
+  // keyed by the family's email -- the SAME link works for every child
+  // that shares that email, across every class each one is in. Given
+  // any student with a parent email on file, finds or creates that
+  // family's account and returns the one link that covers all of them.
+  async function copyFamilyLink(student) {
+    setError("");
+    try {
+      const res = await fetch("/.netlify/functions/get-family-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: student.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not fetch family link.");
+      const url = `${window.location.origin}/family/${data.token}`;
+      navigator.clipboard?.writeText(url).catch(() => {});
+      prompt(`Family link covering every child linked to ${data.email} (also attempted to copy automatically):`, url);
     } catch (e) {
       setError(e.message);
     }
@@ -226,33 +250,45 @@ export default function Roster() {
     }
     setError("");
     try {
-      const [studentRes, parentRes] = await Promise.all([
+      const [studentRes, familyRes] = await Promise.all([
         fetch("/.netlify/functions/get-student-link", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ studentId: student.id }),
         }),
-        fetch("/.netlify/functions/get-parent-link", {
+        fetch("/.netlify/functions/get-family-link", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ studentId: student.id }),
         }),
       ]);
       const studentData = await studentRes.json();
-      const parentData = await parentRes.json();
+      const familyData = await familyRes.json();
       if (!studentRes.ok) throw new Error(studentData.error || "Could not fetch student link.");
-      if (!parentRes.ok) throw new Error(parentData.error || "Could not fetch parent link.");
+      if (!familyRes.ok) throw new Error(familyData.error || "Could not fetch family link.");
 
       const origin = window.location.origin;
       const studentUrl = `${origin}/student/${studentData.token}`;
-      const parentUrl = `${origin}/parent/${parentData.token}`;
+      const familyUrl = `${origin}/family/${familyData.token}`;
       const subject = `EnrichMind links for ${student.name}`;
       const body =
         `Hi!\n\nHere are ${student.name}'s links for tracking progress and approving tasks:\n\n` +
         `${student.name}'s own progress page: ${studentUrl}\n\n` +
-        `Your parent page (you'll set up a 4-digit PIN the first time you open it): ${parentUrl}\n\n` +
+        `Your family dashboard (you'll set up a 4-digit PIN the first time you open it -- this same link covers every child you have in an EnrichMind class): ${familyUrl}\n\n` +
         `Thanks!`;
+      // mailto: navigation has no reliable way to detect whether it
+      // actually opened anything -- no default mail app configured on
+      // this computer, or the same "too long after the click" browser
+      // restriction that affects clipboard writes, both fail silently
+      // with nothing to catch. Always show the raw message too, so
+      // there's a guaranteed way to get it out even if nothing visibly
+      // opens: select all, copy, paste into whatever email tool is
+      // actually being used.
       window.location.href = `mailto:${student.parent_email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      prompt(
+        `If your email program didn't open, copy this and paste it into a new email to ${student.parent_email}:\n(Subject: ${subject})`,
+        body
+      );
     } catch (e) {
       setError(e.message);
     }
@@ -269,12 +305,8 @@ export default function Roster() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not fetch student link.");
       const url = `${window.location.origin}/student/${data.token}`;
-      try {
-        await navigator.clipboard.writeText(url);
-        alert(`Student link copied for ${student.name}.`);
-      } catch {
-        prompt("Copy this link:", url);
-      }
+      navigator.clipboard?.writeText(url).catch(() => {});
+      prompt(`Student link for ${student.name} (also attempted to copy automatically):`, url);
     } catch (e) {
       setError(e.message);
     }
@@ -365,12 +397,13 @@ export default function Roster() {
         groupNameById.get(s.group_id) || "",
         s.parent_email || "",
         `${origin}/student/${s.student_token}`,
+        s.family_token ? `${origin}/family/${s.family_token}` : "",
         `${origin}/parent/${s.parent_token}`,
       ]);
 
       downloadCsv(
         scopeToCurrentLevel ? `${group?.name?.replace(/[^a-z0-9]+/gi, "_") || "level"}_links.csv` : "all_student_parent_links.csv",
-        ["Student Name", "Level", "Parent Email", "Student Link", "Parent Link"],
+        ["Student Name", "Level", "Parent Email", "Student Link", "Family Link (all their kids)", "Parent Link (this class only)"],
         rows
       );
     } catch (e) {
@@ -1029,7 +1062,8 @@ export default function Roster() {
                   items={[
                     { label: "Copy Student Link", onClick: () => copyStudentLink(s) },
                     { label: "Reset Student Link", onClick: () => resetStudentAccess(s), disabled: pinBusyId === s.id },
-                    { label: "Copy Parent Link", onClick: () => copyParentLink(s) },
+                    { label: "Copy Family Link (covers all their kids)", onClick: () => copyFamilyLink(s) },
+                    { label: "Copy Parent Link (this class only)", onClick: () => copyParentLink(s) },
                     { label: "Reset Parent Access", onClick: () => resetParentAccess(s), disabled: pinBusyId === s.id },
                     { label: "Send Both Links by Email", onClick: () => sendLinksByEmail(s) },
                     { label: "Move to Another Level", onClick: () => startMove(s) },

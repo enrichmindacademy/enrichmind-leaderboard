@@ -199,11 +199,17 @@ naturally from whenever they begin.
   before -- only which tier you land in changed. Projector Board's "By
   League" view shows this; "By Growth" (self vs. own 4-week average) and
   "By Streak" are the other two views -- use whichever fits the moment.
-- **Streaks with a built-in freeze.** A streak counts consecutive weeks a
-  student has data. One missed week anywhere in that run is forgiven
-  automatically (frozen), so a single absence doesn't erase weeks of
-  consistency -- mirroring Duolingo's streak-freeze design, which research
-  shows meaningfully extends how long people keep a streak going.
+- **Streaks now mean "consistently scoring well," not just "showed up."**
+  A week only counts toward the streak if that student's composite
+  percentage for it (the same number Diamond/Gold/Silver is judged
+  against) was 95% or higher -- an entry that exists but scored low
+  doesn't extend it any more than a missing week does. One below-bar or
+  missing week anywhere in the run is still forgiven automatically
+  (frozen), so a single rough week doesn't erase a real run of strong
+  ones -- mirroring Duolingo's streak-freeze design, which research shows
+  meaningfully extends how long people keep a streak going. The 95%
+  figure is `STREAK_THRESHOLD` in `src/lib/calc.js` if it ever needs
+  retuning.
 - **Personal bests.** Any week that beats a student's own all-time high
   total is flagged on the Projector Board and on My Progress -- celebrates
   growth independent of where a student ranks.
@@ -281,10 +287,13 @@ growth, goal, tasks, 5-week trend, interests picker, certificate printing
 time from each student's "⋮" menu works, but doesn't scale past a
 handful of students. Roster's **"Export All Links"** buttons (one for
 every Level at once, one for just the currently selected Level) download
-a CSV with **Student Name, Level, Parent Email, Student Link, Parent
-Link** for every active student -- ready to drop into a mail-merge tool
-(Gmail mail merge, or similar) instead of a hundred individual
-copy-paste-sends. Parent Email only shows up if it was captured during
+a CSV with **Student Name, Level, Parent Email, Student Link, Family
+Link, Parent Link** for every active student -- ready to drop into a
+mail-merge tool (Gmail mail merge, or similar) instead of a hundred
+individual copy-paste-sends. Send the Family Link, not the per-class
+Parent Link, unless there's a specific reason a family needs one scoped
+to just one class -- it's the one that actually covers every child and
+every class for that family. Parent Email only shows up if it was captured during
 import: the registration sheet importer (both the manual paste box and
 the automatic sync) now also reads the sheet's **Parent Email** column
 and saves it to `students.parent_email` alongside each student -- a
@@ -355,7 +364,47 @@ one-at-a-time limit ever becomes the actual bottleneck.
 - **"Reset Student Link"** on Roster invalidates the old link and issues
   a new one -- use it if a link needs to be retired.
 
-### Letting parents approve instead of you
+### One family login for every child, across every class
+
+The per-class parent link described below still works, but it has a
+real limitation: since each Level is its own independent roster, a
+student in 2 classes has **2 separate roster rows** -- meaning 2
+separate parent links and 2 separate PINs for the same kid, and a parent
+with 2 kids has it worse. **"Copy Family Link"** (Roster's "⋮" menu, or
+Export All Links' "Family Link" column) is the real fix: one link, one
+PIN, keyed by the parent's **email** rather than by one class
+enrollment. Opening it shows *every* active child sharing that email,
+across *every* Level each one is in, in one dashboard -- no picking
+which kid or which class first.
+
+- Lives at `yourapp.netlify.app/family/<token>`, its own route
+  (`src/pages/FamilyPortal.jsx`), outside the teacher login gate, same as
+  the per-class parent page.
+- Backed by a new `parent_accounts` table, keyed by email -- **not** by
+  student. `netlify/functions/get-family-link.js` finds the account for
+  a given student's `parent_email`, or creates one on the spot if this
+  is the first time anyone's asked for a link for that family, so
+  there's no separate "set up the family account" step for you to do.
+- The PIN model is identical to the per-class version (self-service,
+  first-visit setup, 5-attempt lockout, teacher-resettable) -- just
+  scoped to the account, not to one student.
+- `netlify/functions/family-portal.js` does the actual work: resolves
+  the token to an account, looks up every active student whose
+  `parent_email` matches (case-insensitive), and builds the same
+  progress context (League tier, streak, score breakdown, pending
+  tasks) for each one that the per-class version already builds for a
+  single student -- reusing the same `calc.js` functions everywhere
+  else in the app already does, not a second copy of that math.
+  Approving or rejecting a task re-verifies that the specific child
+  belongs to this account's email server-side before touching anything,
+  so a family can never act on a child that isn't actually theirs even
+  if a submission id were guessed.
+- **Sibling on the same registration row**: since siblings share the
+  same `parent_email` (see the registration importer notes above), a
+  family link generated for either child covers both automatically --
+  no separate setup needed per sibling.
+
+### Letting parents approve instead of you (per-class link)
 
 You don't have to be the one clicking Approve, and you don't have to
 distribute two secrets to every family. On the **Roster** tab, each
@@ -781,6 +830,26 @@ design, not as a gap.
 
 ## Notes / things you may want to adjust
 
+- **Copy-link buttons and "Send Both Links by Email" no longer trust the
+  browser's automatic clipboard write or mailto: handoff silently
+  working.** Both can fail with no thrown error to catch: a clipboard
+  write issued after an `await`ed network call falls outside the short
+  "recent user click" window some browsers require, and a `mailto:`
+  link can just as easily do nothing if there's no default mail app
+  configured, or on some browsers for the same after-an-await reason.
+  Every copy action now always shows the link in a `prompt()` (a
+  guaranteed-selectable text field) in addition to attempting the
+  automatic copy in the background -- and "Send Both Links by Email"
+  always shows the raw message as a fallback too, so there's always a
+  manual copy-paste path even when nothing visibly opens.
+
+- **Weekly Update's default week label is last week, not today.** Scores
+  usually get entered a few days after the week they're for, so the
+  "Week label" field now defaults to 7 days before today instead of
+  today's actual date -- one less thing to notice and manually fix at
+  the start of every entry session. Still fully editable, and the "Pick
+  a week" dropdown for going back further still works exactly the same.
+
 - **Name mismatches in screenshot imports are now a one-time fix, not a
   weekly one.** If a name in a ClassPoint/IXL/Formative/ClassMarker/Kuta
   Works screenshot doesn't match anyone on the roster -- most commonly a
@@ -794,6 +863,24 @@ design, not as a gap.
   runs -- a teacher's past correction is always trusted over a fresh
   guess. Lives in `WeeklyUpdate.jsx` (`resolveMatch`, `saveAlias`) and
   `supabase/schema.sql` (`name_aliases` table).
+
+  This surfaced a real accuracy bug in the underlying fuzzy matcher
+  (`src/lib/fuzzyMatch.js`): a completely unrelated name (a parent's,
+  say) could occasionally get silently, wrongly matched to some
+  student instead of showing up as unmatched at all -- the "unmatched"
+  card can only show what the matcher itself decides it can't resolve.
+  The specific cause was a prefix-match rule with no minimum length
+  requirement -- a short first name on the roster could coincidentally
+  be a literal text-prefix of a totally unrelated full name and get
+  accepted with high confidence on that alone. Fixed by requiring a
+  meaningful prefix length (4+ characters) before that rule fires, and
+  by raising the overall acceptance threshold (0.55 → 0.72) so raw
+  character overlap between two genuinely different names is less
+  likely to clear the bar by accident. Verified against both directions
+  before shipping -- confirmed real unrelated names now correctly fall
+  through to "unmatched," while legitimate cases (exact matches,
+  ClassPoint's first-name-only extraction, IXL's truncated names,
+  minor typos, and short real names) all still match correctly.
 
 - **"Find a Student"** (top of Overview) searches every student across
   every Level at once, not just whichever one is currently selected --

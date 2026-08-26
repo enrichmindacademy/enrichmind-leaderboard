@@ -48,10 +48,21 @@ export function fuzzyMatchName(extractedName, roster) {
       score = Math.max(score, similarity(clean, rFirst));
     }
 
-    // Truncated full name (IXL): treat as a prefix match
+    // Truncated full name (IXL): treat as a prefix match. This one's
+    // safe even for a short prefix, since "..." is an explicit signal
+    // the source data itself was cut off, not a guess.
     if (isTruncated && rNorm.startsWith(clean)) {
       score = Math.max(score, 0.95);
-    } else if (rNorm.startsWith(clean) || clean.startsWith(rFirst)) {
+    } else if (
+      // A prefix match with no truncation marker is a real signal for a
+      // genuinely truncated name, but a dangerous one for a short first
+      // name that coincidentally happens to prefix a completely
+      // unrelated full name (a parent's name on a Formative/ClassMarker
+      // account, say) -- so this only fires for a prefix of meaningful
+      // length, not any short accidental overlap.
+      (rNorm.startsWith(clean) && clean.length >= 4) ||
+      (clean.startsWith(rFirst) && rFirst.length >= 4)
+    ) {
       score = Math.max(score, 0.85);
     }
 
@@ -65,7 +76,13 @@ export function fuzzyMatchName(extractedName, roster) {
   const ambiguous =
     best && runnerUp && Math.abs(best.score - runnerUp.score) < 0.08 && best.score < 0.98;
 
-  if (!best || best.score < 0.55) {
+  // Raised from 0.55 -- that low a bar let two genuinely different full
+  // names (a parent's, say, vs. a student's) occasionally clear it on
+  // raw character overlap alone, with no real semantic match behind it.
+  // A completely wrong but "confident enough" match is worse than no
+  // match at all, since a real mismatch at least shows up for review --
+  // a wrong-but-accepted one doesn't.
+  if (!best || best.score < 0.72) {
     return { match: null, ambiguous: false, candidates: candidates.slice(0, 3) };
   }
 

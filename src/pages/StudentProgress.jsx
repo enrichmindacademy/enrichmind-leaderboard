@@ -129,7 +129,7 @@ export default function StudentProgress() {
 
   const myRankIndex = rankRows.findIndex((r) => r.student.id === studentId);
   const myRow = rankRows[myRankIndex];
-  const streakInfo = studentId ? computeStreak(entriesByWeek, weeks, studentId) : { streak: 0 };
+  const streakInfo = studentId ? computeStreak(entriesByWeek, weeks, studentId, peerStudents) : { streak: 0 };
 
   const divisions = latestWeekId && ctx
     ? assignDivisions(entriesByWeek, weeks, peerStudents, latestWeekId)

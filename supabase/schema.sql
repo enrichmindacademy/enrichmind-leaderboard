@@ -301,6 +301,32 @@ create policy "authenticated read/write task_submissions" on task_submissions
 -- the PIN against server-side.
 revoke select (parent_token, parent_pin, parent_pin_attempts, parent_pin_locked_until, student_token) on students from anon, authenticated;
 
+-- Unified parent accounts: one login per EMAIL, not one per student
+-- enrollment. A parent with two kids, or one kid in two classes, used to
+-- need a totally separate link and PIN for every single class
+-- enrollment (since students.parent_token/parent_pin live on each
+-- roster row, and a student in 2 classes has 2 separate roster rows).
+-- This table is the real fix -- a parent's PIN and access token live
+-- here, keyed by email, and the family-portal function looks up EVERY
+-- student row across every Level that shares this same parent_email at
+-- login time, rather than being scoped to one student row from the
+-- start. Same security posture as students.parent_token/parent_pin: no
+-- RLS policy at all (default-deny), so only a service-role Netlify
+-- Function can ever read or write this table -- never the browser
+-- directly, regardless of login state.
+create table if not exists parent_accounts (
+  id uuid primary key default gen_random_uuid(),
+  email text unique not null,
+  token uuid unique not null default gen_random_uuid(),
+  pin text,
+  pin_set boolean default false,
+  pin_attempts integer default 0,
+  pin_locked_until timestamptz,
+  created_at timestamptz default now()
+);
+
+alter table parent_accounts enable row level security;
+
 -- Persistent name-matching memory: once a teacher manually resolves a
 -- screenshot name that didn't match anyone on the roster (a parent's
 -- name on a Formative account instead of the student's, a nickname, a
@@ -317,6 +343,23 @@ create table if not exists name_aliases (
   created_at timestamptz default now(),
   unique (group_id, raw_name)
 );
+
+-- Identity-based matching, for CSV sources where the raw NAME text isn't
+-- a reliable key even after normalization -- specifically Formative,
+-- where a student can be logged in under a parent's account and the
+-- displayed name can legitimately change between exports (different
+-- parent's device, a typo fixed, etc), while Formative's own Student ID
+-- (and, one level less reliably, their account email) stays constant for
+-- that account forever. `source`/`external_id` let a single row in this
+-- same table be looked up by that stable ID FIRST, before falling back
+-- to the raw_name path above -- one alias table, two ways in, so a
+-- teacher's one-time "this is who that is" confirmation survives even if
+-- the display name drifts week to week.
+alter table name_aliases add column if not exists source text; -- e.g. 'formative'
+alter table name_aliases add column if not exists external_id text; -- e.g. Formative's Student ID
+create unique index if not exists idx_name_aliases_external
+  on name_aliases(group_id, source, external_id)
+  where source is not null and external_id is not null;
 
 alter table name_aliases enable row level security;
 drop policy if exists "authenticated manage name_aliases" on name_aliases;
