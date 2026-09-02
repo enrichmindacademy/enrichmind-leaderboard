@@ -1,4 +1,4 @@
-import { Home, LayoutDashboard, User, UploadCloud, CheckSquare, BarChart2, Users, Clock } from "lucide-react";
+import { Home, LayoutDashboard, User, UploadCloud, CheckSquare, BarChart2, Users, Clock, Trophy } from "lucide-react";
 
 // PRIMARY: the handful of things actually used every day, always visible.
 // SECONDARY: everything else -- still one click away, just tucked behind
@@ -14,4 +14,5 @@ export const NAV_LINKS = [
   { to: "/tasks", label: "Tasks", icon: CheckSquare, primary: false },
   { to: "/insights", label: "Insights", icon: BarChart2, primary: false },
   { to: "/history", label: "History", icon: Clock, primary: false },
+  { to: "/awards", label: "Awards", icon: Trophy, primary: false },
 ];

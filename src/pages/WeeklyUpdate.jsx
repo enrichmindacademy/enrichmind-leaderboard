@@ -86,10 +86,13 @@ export default function WeeklyUpdate() {
   const [formativeFile, setFormativeFile] = useState(null);
   const [formativeCsvFile, setFormativeCsvFile] = useState(null);
   const [formativeMode, setFormativeMode] = useState("csv");
+  const [formativeDestination, setFormativeDestination] = useState("ixl_avg");
   const [classmarkerFile, setClassmarkerFile] = useState(null);
+  const [classmarkerDestination, setClassmarkerDestination] = useState("exam_score");
   const [kutaworksFile, setKutaworksFile] = useState(null);
   const [kutaworksCsvFile, setKutaworksCsvFile] = useState(null);
   const [kutaworksMode, setKutaworksMode] = useState("csv");
+  const [kutaworksDestination, setKutaworksDestination] = useState("exam_score");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [rows, setRows] = useState(null); // review rows, one per active student
@@ -487,14 +490,13 @@ export default function WeeklyUpdate() {
       byStudent[match.id].ixlSourceIdx = idx;
     });
 
-    // Formative and ClassMarker are alternate sources for the same
-    // Assignments field IXL normally fills — already a single percent
-    // per student from the source tool, no per-skill averaging needed.
-    //
-    // Formative rows from CSV mode carry a stable externalId (Formative's
-    // own Student ID) -- resolveMatch checks that FIRST, before the raw
-    // display name, since the name alone can be a parent's account and
-    // isn't trustworthy as a match key on its own.
+    // Formative, ClassMarker, and Kuta Works each have their OWN
+    // destination toggle now (formativeDestination/classmarkerDestination/
+    // kutaworksDestination) -- previously these were hardcoded ("Kuta
+    // Works is an alternate source for Exams"), which silently overwrote
+    // exam_score even for a teacher using Kuta Works for regular
+    // Assignments practice. Same read, same math -- just goes wherever
+    // this particular upload actually belongs this week.
     formative.forEach((row) => {
       const externalKey = row.externalId ? `formative::${row.externalId}` : null;
       const { match, candidates } = resolveMatch(row.name, roster, aliasesMap, externalMap, externalKey);
@@ -512,7 +514,7 @@ export default function WeeklyUpdate() {
         return;
       }
       byStudent[match.id] = byStudent[match.id] || {};
-      byStudent[match.id].ixl_avg = Math.round((Number(row.percent) || 0) * 10) / 10;
+      byStudent[match.id][formativeDestination] = Math.round((Number(row.percent) || 0) * 10) / 10;
     });
     classmarker.forEach((row) => {
       const { match, candidates } = resolveMatch(row.name, roster, aliasesMap);
@@ -521,10 +523,9 @@ export default function WeeklyUpdate() {
         return;
       }
       byStudent[match.id] = byStudent[match.id] || {};
-      byStudent[match.id].ixl_avg = Math.round((Number(row.percent) || 0) * 10) / 10;
+      byStudent[match.id][classmarkerDestination] = Math.round((Number(row.percent) || 0) * 10) / 10;
     });
 
-    // Kuta Works is an alternate source for Exams.
     kutaworks.forEach((row) => {
       const { match, candidates } = resolveMatch(row.name, roster, aliasesMap);
       if (!match) {
@@ -532,7 +533,7 @@ export default function WeeklyUpdate() {
         return;
       }
       byStudent[match.id] = byStudent[match.id] || {};
-      byStudent[match.id].exam_score = Math.round((Number(row.percent) || 0) * 10) / 10;
+      byStudent[match.id][kutaworksDestination] = Math.round((Number(row.percent) || 0) * 10) / 10;
     });
 
     setUnmatchedNames(unmatched);
@@ -845,10 +846,11 @@ export default function WeeklyUpdate() {
         </div>
 
         <div className="rowlabel" style={{ marginBottom: 8 }}>
-          Assignments — use whichever tool you actually assigned this week
+          Add this week's scores — each source has its own destination, set below it
         </div>
         <div className="row" style={{ marginBottom: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div style={{ minWidth: 260 }}>
+            <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>IXL</div>
             <SourceModeToggle mode={ixlMode} onChange={setIxlMode} csvLabel="CSV export (recommended)" />
             {ixlMode === "csv" ? (
               <CsvDropZone label="IXL Score Grid export (.csv)" file={ixlCsvFile} onChange={setIxlCsvFile} />
@@ -866,20 +868,11 @@ export default function WeeklyUpdate() {
               onChange={(e) => setSkillsAssigned(e.target.value)}
               placeholder={ixlMode === "csv" ? "GG.7-9, GG.10" : "F1, 3, 4, 5, I 1, 7"}
             />
-            <label className="muted" style={{ display: "block", marginTop: 8 }}>
-              This IXL report counts toward
-            </label>
-            <select
-              style={{ marginTop: 4 }}
-              value={ixlDestination}
-              onChange={(e) => setIxlDestination(e.target.value)}
-            >
-              <option value="ixl_avg">Assignments</option>
-              <option value="exam_score">Exams</option>
-            </select>
+            <DestinationToggle value={ixlDestination} onChange={setIxlDestination} />
           </div>
 
           <div style={{ minWidth: 260 }}>
+            <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Formative</div>
             <SourceModeToggle mode={formativeMode} onChange={setFormativeMode} csvLabel="CSV export (recommended)" />
             {formativeMode === "csv" ? (
               <>
@@ -892,16 +885,17 @@ export default function WeeklyUpdate() {
             ) : (
               <PasteZone label="Formative results screenshot" file={formativeFile} onChange={setFormativeFile} />
             )}
+            <DestinationToggle value={formativeDestination} onChange={setFormativeDestination} />
           </div>
 
-          <PasteZone label="ClassMarker results screenshot" file={classmarkerFile} onChange={setClassmarkerFile} />
-        </div>
-
-        <div className="rowlabel" style={{ marginBottom: 8 }}>
-          Exams — IXL (toggle above) or Kuta Works
-        </div>
-        <div className="row" style={{ marginBottom: 14, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div style={{ minWidth: 260 }}>
+            <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>ClassMarker</div>
+            <PasteZone label="ClassMarker results screenshot" file={classmarkerFile} onChange={setClassmarkerFile} />
+            <DestinationToggle value={classmarkerDestination} onChange={setClassmarkerDestination} />
+          </div>
+
+          <div style={{ minWidth: 260 }}>
+            <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Kuta Works</div>
             <SourceModeToggle mode={kutaworksMode} onChange={setKutaworksMode} csvLabel="CSV export (recommended)" />
             {kutaworksMode === "csv" ? (
               <CsvDropZone
@@ -912,6 +906,7 @@ export default function WeeklyUpdate() {
             ) : (
               <PasteZone label="Kuta Works results screenshot" file={kutaworksFile} onChange={setKutaworksFile} />
             )}
+            <DestinationToggle value={kutaworksDestination} onChange={setKutaworksDestination} />
           </div>
         </div>
 
@@ -1141,6 +1136,37 @@ function SourceModeToggle({ mode, onChange, csvLabel = "CSV export" }) {
         onClick={() => onChange("screenshot")}
       >
         Screenshot
+      </button>
+    </div>
+  );
+}
+
+// Every score source gets its OWN explicit "where does this go" choice --
+// no source is hardcoded to Assignments or Exams anymore. This is what a
+// Kuta Works upload silently landing in Exams (when it was actually this
+// week's Assignments) was actually missing: the destination was assumed
+// by the code instead of chosen by the teacher every time.
+function DestinationToggle({ value, onChange }) {
+  return (
+    <div className="row" style={{ gap: 6, marginTop: 8 }}>
+      <span className="muted" style={{ fontSize: 11.5, alignSelf: "center" }}>
+        Counts toward:
+      </span>
+      <button
+        type="button"
+        className={`btn ${value === "ixl_avg" ? "" : "secondary"}`}
+        style={{ padding: "3px 10px", fontSize: 11.5 }}
+        onClick={() => onChange("ixl_avg")}
+      >
+        Assignments
+      </button>
+      <button
+        type="button"
+        className={`btn ${value === "exam_score" ? "" : "secondary"}`}
+        style={{ padding: "3px 10px", fontSize: 11.5 }}
+        onClick={() => onChange("exam_score")}
+      >
+        Exams
       </button>
     </div>
   );

@@ -14,6 +14,35 @@ create table if not exists groups (
 );
 
 alter table groups add column if not exists teacher_contact text;
+
+-- Year-end awards. Deliberately free-form (title + a specific "why", not
+-- a fixed set of trophies) -- research on classroom recognition is
+-- consistent that SPECIFIC recognition ("for a 9-week Diamond League
+-- streak") lands far better than a generic certificate, and that a
+-- program aiming to recognize every student needs categories that can
+-- expand indefinitely, not a small fixed set. The suggestion engine
+-- (src/lib/awardSuggestions.js) proposes real, data-backed candidates
+-- across several categories, but the teacher can also add a fully
+-- custom award (title + detail, no student left un-recognizable just
+-- because they didn't top a specific stat).
+create table if not exists awards (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid references groups(id) on delete cascade,
+  student_id uuid references students(id) on delete cascade,
+  title text not null, -- e.g. "Growth Champion", "The Curiosity Catalyst Award"
+  detail text, -- the specific "why" -- e.g. "Averaged +6.2% growth over their own weekly average, all season"
+  created_at timestamptz default now()
+);
+
+alter table awards enable row level security;
+drop policy if exists "authenticated manage awards" on awards;
+create policy "authenticated manage awards" on awards
+  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- Awards stay hidden from students (and the family/student portals) until
+-- a teacher explicitly flips this -- keeps the reveal-at-a-ceremony
+-- moment intact instead of leaking who's getting what all year.
+alter table groups add column if not exists awards_revealed boolean not null default false;
 alter table groups add column if not exists meets_day text check (meets_day in ('Mon','Tue','Wed','Thu','Fri','Sat','Sun'));
 
 -- A "session" is a separate meeting time within the same level/leaderboard

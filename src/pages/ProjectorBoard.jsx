@@ -315,10 +315,18 @@ export default function ProjectorBoard() {
         {personalBests.length > 0 && (
           <div className="spotlight-card">
             <div className="spotlight-label">🏆 New Personal Bests</div>
-            <div className="spotlight-name" style={{ fontSize: 16 }}>
-              {personalBests.map((s) => s.name).join(", ")}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+              {personalBests.map((s) => (
+                <span
+                  key={s.id}
+                  className="pill"
+                  style={{ fontSize: 13, padding: "3px 10px", background: "rgba(255,255,255,0.08)" }}
+                >
+                  {s.name}
+                </span>
+              ))}
             </div>
-            <div className="muted">Their highest weekly total ever</div>
+            <div className="muted" style={{ marginTop: 6 }}>Their highest weekly total ever</div>
           </div>
         )}
       </div>

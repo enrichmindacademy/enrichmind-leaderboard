@@ -1,10 +1,10 @@
-import { useMemo, useState, useEffect } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
+import { useMemo, useState, useEffect } from "react";import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import { useGroup } from "../lib/GroupContext";
 import { supabase } from "../supabaseClient";
 import { INTEREST_OPTIONS } from "../lib/autoAssign";
 import NextMilestone from "../components/NextMilestone";
 import KpiStrip from "../components/KpiStrip";
+import StudentWeeklyTable from "../components/StudentWeeklyTable";
 import {
   computeGrowthForWeek,
   computeStreak,
@@ -56,10 +56,27 @@ export default function MyProgress() {
   } = useGroup();
   const group = groups.find((g) => g.id === groupId);
   const [studentId, setStudentId] = useState("");
+  const [myAwards, setMyAwards] = useState([]);
 
   useEffect(() => {
     setStudentId("");
   }, [groupId]);
+
+  // Only fetched (and only ever shown) once the teacher has flipped
+  // awards_revealed for this group -- see src/pages/Awards.jsx. Keeping
+  // the reveal check here too (not just hiding the UI) means an award
+  // never even reaches this browser before the teacher means it to.
+  useEffect(() => {
+    if (!studentId || !group?.awards_revealed) {
+      setMyAwards([]);
+      return;
+    }
+    supabase
+      .from("awards")
+      .select("id, title, detail")
+      .eq("student_id", studentId)
+      .then(({ data }) => setMyAwards(data || []));
+  }, [studentId, group?.awards_revealed]);
   const [submitting, setSubmitting] = useState(null);
   const [reflectionDrafts, setReflectionDrafts] = useState({});
   const [goalMetric, setGoalMetric] = useState("total");
@@ -665,6 +682,29 @@ export default function MyProgress() {
               </ResponsiveContainer>
             </div>
           </div>
+
+          <div className="card">
+            <div className="card-title" style={{ marginBottom: 10 }}>
+              Your Full History — Every Week
+            </div>
+            <p className="muted" style={{ marginBottom: 12 }}>
+              Check this against what you remember turning in — if a week looks wrong, tell your
+              teacher which week and what it should say.
+            </p>
+            <StudentWeeklyTable weeks={weeks} entriesByWeek={entriesByWeek} studentId={studentId} />
+          </div>
+
+          {myAwards.length > 0 && (
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 10 }}>🏆 Your Awards</div>
+              {myAwards.map((a) => (
+                <div key={a.id} style={{ marginBottom: 10 }}>
+                  <div style={{ fontWeight: 600 }}>{a.title}</div>
+                  {a.detail && <div className="muted">{a.detail}</div>}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="certificate-print">
             <div className="certificate-inner">

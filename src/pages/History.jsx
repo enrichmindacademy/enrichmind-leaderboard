@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useGroup } from "../lib/GroupContext";
 import { supabase } from "../supabaseClient";
 import { downloadCsv } from "../lib/csv";
+import ClassWeeklyGrid from "../components/ClassWeeklyGrid";
 
 const MULTIPLIER_OPTIONS = [1, 1.5, 2];
 
@@ -18,6 +19,7 @@ export default function History() {
   const [addStudentId, setAddStudentId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [gridView, setGridView] = useState(false); // false = single week (existing), true = all-weeks grid
 
   const [catchUpStudentId, setCatchUpStudentId] = useState("");
   const [catchUpDrafts, setCatchUpDrafts] = useState({}); // { [weekId]: {stars, ixl_avg, ...} }
@@ -286,13 +288,33 @@ export default function History() {
         <div className="row" style={{ justifyContent: "space-between" }}>
           <div>
             <div className="card-title" style={{ marginBottom: 8 }}>Browse a Past Week</div>
-            <select value={activeWeekId} onChange={(e) => { setWeekId(e.target.value); setEditing(false); }}>
-              {sortedWeeks.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.label}
-                </option>
-              ))}
-            </select>
+            <div className="row" style={{ gap: 6, marginBottom: 8 }}>
+              <button
+                type="button"
+                className={`btn ${!gridView ? "" : "secondary"}`}
+                style={{ padding: "3px 10px", fontSize: 11.5 }}
+                onClick={() => setGridView(false)}
+              >
+                Single Week
+              </button>
+              <button
+                type="button"
+                className={`btn ${gridView ? "" : "secondary"}`}
+                style={{ padding: "3px 10px", fontSize: 11.5 }}
+                onClick={() => setGridView(true)}
+              >
+                All Weeks (Grid)
+              </button>
+            </div>
+            {!gridView && (
+              <select value={activeWeekId} onChange={(e) => { setWeekId(e.target.value); setEditing(false); }}>
+                {sortedWeeks.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <button className="btn secondary" onClick={exportAllHistoryCsv}>
             Export Full History (CSV)
@@ -300,7 +322,25 @@ export default function History() {
         </div>
       </div>
 
-      {week && !editing && (
+      {gridView && (
+        <div className="card">
+          <div className="card-title" style={{ marginBottom: 10 }}>
+            Every student, every week — spot a wrong or missing entry at a glance
+          </div>
+          <ClassWeeklyGrid
+            weeks={weeks}
+            students={students}
+            entriesByWeek={entriesByWeek}
+            onSelectWeek={(wid) => {
+              setWeekId(wid);
+              setGridView(false);
+              setEditing(false);
+            }}
+          />
+        </div>
+      )}
+
+      {!gridView && week && !editing && (
         <div className="card">
           <div className="row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
             <div className="card-title" style={{ marginBottom: 0 }}>
@@ -355,7 +395,7 @@ export default function History() {
         </div>
       )}
 
-      {week && editing && draft && (
+      {!gridView && week && editing && draft && (
         <div className="card">
           <div className="card-title">Editing {week.label}</div>
           <div className="row" style={{ marginBottom: 12 }}>
@@ -521,8 +561,9 @@ export default function History() {
         </div>
       )}
 
-      <div className="card">
-        <div className="card-title">Edit History — {week?.label || "This Week"}</div>
+      {!gridView && (
+        <div className="card">
+          <div className="card-title">Edit History — {week?.label || "This Week"}</div>
         <p className="muted" style={{ marginBottom: 12 }}>
           Every change to any saved score in this week, automatically logged the moment it's
           saved — from any of the ways scores get edited (Weekly Update, Quick Update, this
@@ -556,6 +597,7 @@ export default function History() {
             );
           })}
       </div>
+      )}
 
       <div className="card">
         <div className="card-title">Catch-Up — One Student, Every Week</div>

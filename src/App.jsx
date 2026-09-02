@@ -14,6 +14,7 @@ import Tasks from "./pages/Tasks";
 import Insights from "./pages/Insights";
 import Roster from "./pages/Roster";
 import History from "./pages/History";
+import Awards from "./pages/Awards";
 import ParentApproval from "./pages/ParentApproval";
 import FamilyPortal from "./pages/FamilyPortal";
 import StudentProgress from "./pages/StudentProgress";
@@ -104,6 +105,7 @@ function Shell() {
               <Route path="/insights" element={<Insights />} />
               <Route path="/roster" element={<Roster />} />
               <Route path="/history" element={<History />} />
+              <Route path="/awards" element={<Awards />} />
             </Routes>
           )}
           {!groupId && (
