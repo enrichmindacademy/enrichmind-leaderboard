@@ -21,6 +21,24 @@ export default function History() {
   const [error, setError] = useState("");
   const [gridView, setGridView] = useState(false); // false = single week (existing), true = all-weeks grid
 
+  // Inline edits from the grid write straight to Supabase, one field at
+  // a time -- no navigating to a week's edit view just to fix one
+  // number. Creates the entry row if the student didn't have one for
+  // that week at all yet (same insert-or-update pattern used everywhere
+  // else scores get written).
+  async function saveGridCell(weekId, studentId, field, rawValue) {
+    const value = Number(rawValue);
+    const existing = entriesByWeek[weekId]?.[studentId];
+    if (existing) {
+      await supabase.from("entries").update({ [field]: Number.isFinite(value) ? value : 0 }).eq("id", existing.id);
+    } else {
+      await supabase
+        .from("entries")
+        .insert({ week_id: weekId, student_id: studentId, [field]: Number.isFinite(value) ? value : 0 });
+    }
+    await reload();
+  }
+
   const [catchUpStudentId, setCatchUpStudentId] = useState("");
   const [catchUpDrafts, setCatchUpDrafts] = useState({}); // { [weekId]: {stars, ixl_avg, ...} }
   const [catchUpSaving, setCatchUpSaving] = useState(false);
@@ -331,6 +349,7 @@ export default function History() {
             weeks={weeks}
             students={students}
             entriesByWeek={entriesByWeek}
+            onSaveCell={saveGridCell}
             onSelectWeek={(wid) => {
               setWeekId(wid);
               setGridView(false);
