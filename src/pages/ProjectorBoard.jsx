@@ -119,6 +119,7 @@ export default function ProjectorBoard() {
   const latestWeekId = latestWeek?.id;
   const activeStudents = students.filter((s) => s.active);
   const [view, setView] = useState("everyone");
+  const [showSuperstarChart, setShowSuperstarChart] = useState(false); // collapsed by default -- an all-time stat, not this week's primary info, so it shouldn't eat the top of the screen
   const [sessionFilter, setSessionFilter] = useState(null); // null = not yet chosen by the teacher
 
   // Live/inline score editing right from the leaderboard row — for fixing
@@ -310,109 +311,6 @@ export default function ProjectorBoard() {
       )}
 
       <div className="card">
-        <div className="card-title">Two-Team Goal Progress</div>
-        <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-          <span className="muted">Team A — {cumulative.A.toFixed(0)} pts</span>
-          <span className="muted">Team B — {cumulative.B.toFixed(0)} pts</span>
-        </div>
-        <div className="progress-track" style={{ marginBottom: 4 }}>
-          <div className="progress-fill-a" style={{ width: `${pctA}%` }} />
-        </div>
-        <div className="progress-track">
-          <div className="progress-fill-b" style={{ width: `${pctB}%` }} />
-        </div>
-        <p className="muted" style={{ marginTop: 8 }}>
-          Goal: {goalPoints} pts per team ({group?.goal_label || "Class Goal"})
-          {multiplier > 1 && (
-            <span style={{ color: "#c9891f", fontWeight: 700 }}> · ⚡ {multiplier}x Bonus Week!</span>
-          )}
-        </p>
-      </div>
-
-      {(superstarsThisWeek.length > 0 || standings.length > 0) && (
-        <div className="superstar-card">
-          <div className="superstar-title">🌟 Superstars of the Week — Perfect IXL Club</div>
-          {superstarsThisWeek.length > 0 ? (
-            <div className="superstar-names">
-              {superstarsThisWeek
-                .map((s) => `${s.name} (${superstarCount(entriesByWeek, weeks, s.id)}x all-time)`)
-                .join("  ·  ")}
-              {" "}
-              hit 100% IXL this week!
-            </div>
-          ) : (
-            <div className="muted">No perfect IXL scores this week — first one back on top next week!</div>
-          )}
-        </div>
-      )}
-
-      {standings.length > 0 && (
-        <div className="card">
-          <div className="card-title">🌟 Superstar Counts — All-Time</div>
-          <p className="muted" style={{ marginBottom: 10 }}>
-            How many perfect-IXL weeks each student has earned so far — a running,
-            separate competition from the main leaderboard.
-          </p>
-          <div style={{ width: "100%", height: Math.max(160, standings.length * 34) }}>
-            <ResponsiveContainer>
-              <BarChart data={standings.map((r) => ({ name: r.student.name, count: r.count }))} layout="vertical" margin={{ left: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(30,20,60,0.12)" horizontal={false} />
-                <XAxis type="number" allowDecimals={false} stroke="#736c8d" fontSize={12} />
-                <YAxis type="category" dataKey="name" stroke="#736c8d" fontSize={12} width={90} />
-                <Tooltip
-                  cursor={{ fill: "rgba(30,20,60,0.06)" }}
-                  contentStyle={{ background: "#1e0b3c", border: "1px solid rgba(255,255,255,0.15)" }}
-                />
-                <Bar dataKey="count" radius={[0, 6, 6, 0]}>
-                  {standings.map((_, i) => (
-                    <Cell key={i} fill={i === 0 ? "#c9891f" : "#a87f2e"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      <div className="spotlight-grid">
-        {mostImproved && (
-          <div className="spotlight-card">
-            <div className="spotlight-label">🚀 Most Improved</div>
-            <div className="spotlight-name">{mostImproved.student.name}</div>
-            <div className="muted">
-              +{mostImproved.growth.toFixed(1)} pts vs their 4-week average
-            </div>
-          </div>
-        )}
-        {comeback && (
-          <div className="spotlight-card">
-            <div className="spotlight-label">🔥 Comeback of the Week</div>
-            <div className="spotlight-name">{comeback.student.name}</div>
-            <div className="muted">
-              Back up +{comeback.growth.toFixed(1)} pts after a dip last week
-            </div>
-          </div>
-        )}
-        {personalBests.length > 0 && (
-          <div className="spotlight-card">
-            <div className="spotlight-label">🏆 New Personal Bests</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
-              {personalBests.map((s) => (
-                <span
-                  key={s.id}
-                  className="pill"
-                  style={{ fontSize: 13, padding: "3px 10px", background: "rgba(255,255,255,0.08)" }}
-                >
-                  {s.name}
-                </span>
-              ))}
-            </div>
-            <div className="muted" style={{ marginTop: 6 }}>Their highest weekly total ever</div>
-          </div>
-        )}
-      </div>
-
-      <div className="card">
         <div className="row" style={{ justifyContent: "space-between", marginBottom: 14 }}>
           <div className="card-title" style={{ marginBottom: 0 }}>
             {weeks.find((w) => w.id === latestWeekId)?.label}
@@ -506,6 +404,127 @@ export default function ProjectorBoard() {
           />
         )}
       </div>
+
+      <div className="spotlight-grid">
+        {mostImproved && (
+          <div className="spotlight-card">
+            <div className="spotlight-label">🚀 Most Improved</div>
+            <div className="spotlight-name">{mostImproved.student.name}</div>
+            <div className="muted">
+              +{mostImproved.growth.toFixed(1)} pts vs their 4-week average
+            </div>
+          </div>
+        )}
+        {comeback && (
+          <div className="spotlight-card">
+            <div className="spotlight-label">🔥 Comeback of the Week</div>
+            <div className="spotlight-name">{comeback.student.name}</div>
+            <div className="muted">
+              Back up +{comeback.growth.toFixed(1)} pts after a dip last week
+            </div>
+          </div>
+        )}
+        {personalBests.length > 0 && (
+          <div className="spotlight-card">
+            <div className="spotlight-label">🏆 New Personal Bests</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+              {personalBests.map((s) => (
+                <span
+                  key={s.id}
+                  className="pill"
+                  style={{ fontSize: 13, padding: "3px 10px", background: "rgba(255,255,255,0.08)" }}
+                >
+                  {s.name}
+                </span>
+              ))}
+            </div>
+            <div className="muted" style={{ marginTop: 6 }}>Their highest weekly total ever</div>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="card-title">Two-Team Goal Progress</div>
+        <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+          <span className="muted">Team A — {cumulative.A.toFixed(0)} pts</span>
+          <span className="muted">Team B — {cumulative.B.toFixed(0)} pts</span>
+        </div>
+        <div className="progress-track" style={{ marginBottom: 4 }}>
+          <div className="progress-fill-a" style={{ width: `${pctA}%` }} />
+        </div>
+        <div className="progress-track">
+          <div className="progress-fill-b" style={{ width: `${pctB}%` }} />
+        </div>
+        <p className="muted" style={{ marginTop: 8 }}>
+          Goal: {goalPoints} pts per team ({group?.goal_label || "Class Goal"})
+          {multiplier > 1 && (
+            <span style={{ color: "#c9891f", fontWeight: 700 }}> · ⚡ {multiplier}x Bonus Week!</span>
+          )}
+        </p>
+      </div>
+
+      {(superstarsThisWeek.length > 0 || standings.length > 0) && (
+        <div className="superstar-card">
+          <div className="superstar-title">🌟 Superstars of the Week — Perfect IXL Club</div>
+          {superstarsThisWeek.length > 0 ? (
+            <div className="superstar-names">
+              {superstarsThisWeek
+                .map((s) => `${s.name} (${superstarCount(entriesByWeek, weeks, s.id)}x all-time)`)
+                .join("  ·  ")}
+              {" "}
+              hit 100% IXL this week!
+            </div>
+          ) : (
+            <div className="muted">No perfect IXL scores this week — first one back on top next week!</div>
+          )}
+        </div>
+      )}
+
+      {standings.length > 0 && (
+        <div className="card">
+          <button
+            type="button"
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              width: "100%",
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+            }}
+            onClick={() => setShowSuperstarChart((v) => !v)}
+          >
+            <div className="card-title" style={{ marginBottom: 0 }}>🌟 Superstar Counts — All-Time</div>
+            <span className="muted">{showSuperstarChart ? "Hide ▲" : "Show ▼"}</span>
+          </button>
+          {showSuperstarChart && (
+            <>
+              <p className="muted" style={{ marginTop: 10, marginBottom: 10 }}>
+                All-time perfect-IXL weeks — a separate, running competition from this week's board.
+              </p>
+              <div style={{ width: "100%", height: Math.max(160, standings.length * 34) }}>
+                <ResponsiveContainer>
+                  <BarChart data={standings.map((r) => ({ name: r.student.name, count: r.count }))} layout="vertical" margin={{ left: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(30,20,60,0.12)" horizontal={false} />
+                    <XAxis type="number" allowDecimals={false} stroke="#736c8d" fontSize={12} />
+                    <YAxis type="category" dataKey="name" stroke="#736c8d" fontSize={12} width={90} />
+                    <Tooltip
+                      cursor={{ fill: "rgba(30,20,60,0.06)" }}
+                      contentStyle={{ background: "#1e0b3c", border: "1px solid rgba(255,255,255,0.15)" }}
+                    />
+                    <Bar dataKey="count" radius={[0, 6, 6, 0]}>
+                      {standings.map((_, i) => (
+                        <Cell key={i} fill={i === 0 ? "#c9891f" : "#a87f2e"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </>
   );
 }
