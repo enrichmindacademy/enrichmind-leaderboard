@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Calculator, MessageSquare, ClipboardCheck, PenTool, Star } from "lucide-react";
 import { useGroup } from "../lib/GroupContext";
 import { supabase } from "../supabaseClient";
 
@@ -81,17 +82,17 @@ export default function WeeklyUpdate() {
   const [classpointFiles, setClasspointFiles] = useState({}); // { [slotKey]: File }
   const [ixlFile, setIxlFile] = useState(null);
   const [ixlCsvFile, setIxlCsvFile] = useState(null);
-  const [ixlMode, setIxlMode] = useState("csv"); // "csv" (recommended) or "screenshot"
+  const [ixlMode, setIxlMode] = useState("screenshot"); // screenshot is the default -- CSV is available but not preferred day-to-day
   const [ixlDestination, setIxlDestination] = useState("ixl_avg"); // "ixl_avg" (Assignments) or "exam_score" (Exams)
   const [formativeFile, setFormativeFile] = useState(null);
   const [formativeCsvFile, setFormativeCsvFile] = useState(null);
-  const [formativeMode, setFormativeMode] = useState("csv");
+  const [formativeMode, setFormativeMode] = useState("screenshot");
   const [formativeDestination, setFormativeDestination] = useState("ixl_avg");
   const [classmarkerFile, setClassmarkerFile] = useState(null);
   const [classmarkerDestination, setClassmarkerDestination] = useState("exam_score");
   const [kutaworksFile, setKutaworksFile] = useState(null);
   const [kutaworksCsvFile, setKutaworksCsvFile] = useState(null);
-  const [kutaworksMode, setKutaworksMode] = useState("csv");
+  const [kutaworksMode, setKutaworksMode] = useState("screenshot");
   const [kutaworksDestination, setKutaworksDestination] = useState("exam_score");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -822,96 +823,70 @@ export default function WeeklyUpdate() {
         </div>
       </div>
 
-      <div className="card">        <div className="card-title">2. Add Screenshots</div>
-        {classpointSlots.length > 1 && (
-          <p className="muted" style={{ marginBottom: 10 }}>
-            This level has {classpointSlots.length} sessions — add each session's ClassPoint
-            screenshot below. Whichever session a student attended that week provides their
-            stars.
-          </p>
-        )}
-        <p className="muted" style={{ marginBottom: 10 }}>
-          No need to save the screenshot as a file first — copy it (e.g. Win+Shift+S / the
-          Snipping Tool), click into a box below, and press Ctrl+V.
-        </p>
-        <div className="row" style={{ marginBottom: 10, flexWrap: "wrap" }}>
+      <div className="card">
+        <div className="card-title">Add Scores</div>
+
+        <div className="row" style={{ gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
           {classpointSlots.map((slot) => (
-            <PasteZone
-              key={slot.key}
-              label={`ClassPoint stars${slot.label ? ` — ${slot.label}` : ""}`}
-              file={classpointFiles[slot.key] || null}
-              onChange={(file) => setClasspointFile(slot.key, file)}
-            />
+            <SourceCard key={slot.key} icon={Star} name={slot.label || "Participation"} color="var(--gold)">
+              <PasteZone label="" file={classpointFiles[slot.key] || null} onChange={(file) => setClasspointFile(slot.key, file)} />
+            </SourceCard>
           ))}
         </div>
 
-        <div className="rowlabel" style={{ marginBottom: 8 }}>
-          Add this week's scores — each source has its own destination, set below it
-        </div>
-        <div className="row" style={{ marginBottom: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-          <div style={{ minWidth: 260 }}>
-            <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>IXL</div>
-            <SourceModeToggle mode={ixlMode} onChange={setIxlMode} csvLabel="CSV export (recommended)" />
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            gap: 10,
+            marginBottom: 16,
+          }}
+        >
+          <SourceCard icon={Calculator} name="IXL" color="var(--purple-500)">
+            <SourceModeToggle mode={ixlMode} onChange={setIxlMode} csvLabel="CSV" />
             {ixlMode === "csv" ? (
-              <CsvDropZone label="IXL Score Grid export (.csv)" file={ixlCsvFile} onChange={setIxlCsvFile} />
+              <CsvDropZone label="" file={ixlCsvFile} onChange={setIxlCsvFile} />
             ) : (
-              <PasteZone label="IXL score report screenshot" file={ixlFile} onChange={setIxlFile} />
+              <PasteZone label="" file={ixlFile} onChange={setIxlFile} />
             )}
-            <label className="muted" style={{ display: "block", marginTop: 8 }}>
-              {ixlMode === "csv"
-                ? 'Skills assigned this week (e.g. "GG.7-9, GG.10" — the real codes from the export, not shorthand)'
-                : 'Skills assigned this week (e.g. "F1, 3, 4, 5, I 1, 7") — only used to read the IXL report correctly'}
-            </label>
             <input
-              style={{ width: "100%", marginTop: 4 }}
+              style={{ width: "100%", marginTop: 8 }}
               value={skillsAssigned}
               onChange={(e) => setSkillsAssigned(e.target.value)}
-              placeholder={ixlMode === "csv" ? "GG.7-9, GG.10" : "F1, 3, 4, 5, I 1, 7"}
+              placeholder={ixlMode === "csv" ? "Skills e.g. GG.7-9" : "Skills e.g. F1, 3, 4"}
+              title="Skill codes assigned this week"
             />
             <DestinationToggle value={ixlDestination} onChange={setIxlDestination} />
-          </div>
+          </SourceCard>
 
-          <div style={{ minWidth: 260 }}>
-            <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Formative</div>
-            <SourceModeToggle mode={formativeMode} onChange={setFormativeMode} csvLabel="CSV export (recommended)" />
+          <SourceCard icon={MessageSquare} name="Formative" color="var(--blue-500)" hint="Matches by student account, not display name">
+            <SourceModeToggle mode={formativeMode} onChange={setFormativeMode} csvLabel="CSV" />
             {formativeMode === "csv" ? (
-              <>
-                <CsvDropZone label="Formative export (.csv)" file={formativeCsvFile} onChange={setFormativeCsvFile} />
-                <p className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
-                  Matches by the student's Formative account, not the display name — safe even if
-                  a parent's name shows up instead of the student's.
-                </p>
-              </>
+              <CsvDropZone label="" file={formativeCsvFile} onChange={setFormativeCsvFile} />
             ) : (
-              <PasteZone label="Formative results screenshot" file={formativeFile} onChange={setFormativeFile} />
+              <PasteZone label="" file={formativeFile} onChange={setFormativeFile} />
             )}
             <DestinationToggle value={formativeDestination} onChange={setFormativeDestination} />
-          </div>
+          </SourceCard>
 
-          <div style={{ minWidth: 260 }}>
-            <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>ClassMarker</div>
-            <PasteZone label="ClassMarker results screenshot" file={classmarkerFile} onChange={setClassmarkerFile} />
+          <SourceCard icon={ClipboardCheck} name="ClassMarker" color="var(--green)">
+            <PasteZone label="" file={classmarkerFile} onChange={setClassmarkerFile} />
             <DestinationToggle value={classmarkerDestination} onChange={setClassmarkerDestination} />
-          </div>
+          </SourceCard>
 
-          <div style={{ minWidth: 260 }}>
-            <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Kuta Works</div>
-            <SourceModeToggle mode={kutaworksMode} onChange={setKutaworksMode} csvLabel="CSV export (recommended)" />
+          <SourceCard icon={PenTool} name="Kuta Works" color="var(--red)">
+            <SourceModeToggle mode={kutaworksMode} onChange={setKutaworksMode} csvLabel="CSV" />
             {kutaworksMode === "csv" ? (
-              <CsvDropZone
-                label="Kuta Works results export (.csv)"
-                file={kutaworksCsvFile}
-                onChange={setKutaworksCsvFile}
-              />
+              <CsvDropZone label="" file={kutaworksCsvFile} onChange={setKutaworksCsvFile} />
             ) : (
-              <PasteZone label="Kuta Works results screenshot" file={kutaworksFile} onChange={setKutaworksFile} />
+              <PasteZone label="" file={kutaworksFile} onChange={setKutaworksFile} />
             )}
             <DestinationToggle value={kutaworksDestination} onChange={setKutaworksDestination} />
-          </div>
+          </SourceCard>
         </div>
 
         <button className="btn" onClick={handleParse} disabled={busy}>
-          {busy ? "Reading files…" : "Extract Data"}
+          {busy ? "Reading…" : "Extract Data"}
         </button>
         {error && <div className="error-text">{error}</div>}
       </div>
@@ -1123,19 +1098,19 @@ function SourceModeToggle({ mode, onChange, csvLabel = "CSV export" }) {
     <div className="row" style={{ gap: 6, marginBottom: 6 }}>
       <button
         type="button"
-        className={`btn ${mode === "csv" ? "" : "secondary"}`}
-        style={{ padding: "3px 10px", fontSize: 11.5 }}
-        onClick={() => onChange("csv")}
-      >
-        {csvLabel}
-      </button>
-      <button
-        type="button"
         className={`btn ${mode === "screenshot" ? "" : "secondary"}`}
         style={{ padding: "3px 10px", fontSize: 11.5 }}
         onClick={() => onChange("screenshot")}
       >
         Screenshot
+      </button>
+      <button
+        type="button"
+        className={`btn ${mode === "csv" ? "" : "secondary"}`}
+        style={{ padding: "3px 10px", fontSize: 11.5 }}
+        onClick={() => onChange("csv")}
+      >
+        {csvLabel}
       </button>
     </div>
   );
@@ -1146,16 +1121,35 @@ function SourceModeToggle({ mode, onChange, csvLabel = "CSV export" }) {
 // Kuta Works upload silently landing in Exams (when it was actually this
 // week's Assignments) was actually missing: the destination was assumed
 // by the code instead of chosen by the teacher every time.
+// A distinctly-bordered, color-coded box per score source -- the whole
+// point is that IXL, Formative, ClassMarker, and Kuta Works should never
+// be mistakable for one another at a glance.
+function SourceCard({ icon: Icon, name, color, hint, children }) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--card-border)",
+        borderLeft: `3px solid ${color}`,
+        borderRadius: "var(--radius-md)",
+        padding: "12px 14px",
+      }}
+    >
+      <div className="row" style={{ gap: 6, marginBottom: 8, alignItems: "center" }} title={hint}>
+        <Icon size={15} color={color} />
+        <span style={{ fontWeight: 700, fontSize: 13 }}>{name}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function DestinationToggle({ value, onChange }) {
   return (
     <div className="row" style={{ gap: 6, marginTop: 8 }}>
-      <span className="muted" style={{ fontSize: 11.5, alignSelf: "center" }}>
-        Counts toward:
-      </span>
       <button
         type="button"
         className={`btn ${value === "ixl_avg" ? "" : "secondary"}`}
-        style={{ padding: "3px 10px", fontSize: 11.5 }}
+        style={{ padding: "3px 10px", fontSize: 11.5, flex: 1 }}
         onClick={() => onChange("ixl_avg")}
       >
         Assignments
@@ -1163,7 +1157,7 @@ function DestinationToggle({ value, onChange }) {
       <button
         type="button"
         className={`btn ${value === "exam_score" ? "" : "secondary"}`}
-        style={{ padding: "3px 10px", fontSize: 11.5 }}
+        style={{ padding: "3px 10px", fontSize: 11.5, flex: 1 }}
         onClick={() => onChange("exam_score")}
       >
         Exams

@@ -24,10 +24,91 @@ function initials(name) {
 }
 
 const VIEWS = [
+  { key: "everyone", label: "Everyone" },
   { key: "growth", label: "By Growth" },
   { key: "division", label: "By League" },
   { key: "streak", label: "By Streak" },
 ];
+
+const TIER_COLORS = ["var(--blue-500)", "var(--gold)", "var(--text-lo)"]; // Diamond, Gold, Silver
+const TIER_EMOJI = ["💎", "🥇", "🥈"];
+const TIER_LABELS = ["Diamond", "Gold", "Silver"];
+
+// The default landing view -- every student, one glance, grouped by
+// league (an absolute bar, not a rank) rather than a single sorted list,
+// so nobody's position on the page itself implies "worst." Badges surface
+// exactly what the separate Growth/Streak/Superstar tabs used to require
+// clicking through one at a time to see -- streak, growth, a perfect
+// week, a new personal best -- all visible without a single click. Click
+// any card to jump straight into that student's editable row for the
+// full breakdown.
+function EveryoneView({ divisions, growthRows, personalBests, superstarsThisWeek, onCardClick }) {
+  const personalBestIds = new Set(personalBests.map((s) => s.id));
+  const superstarIds = new Set(superstarsThisWeek.map((s) => s.id));
+
+  const byTier = [[], [], []];
+  divisions.forEach((d) => {
+    const g = growthRows.find((r) => r.student.id === d.student.id);
+    byTier[d.tierIndex].push({
+      student: d.student,
+      growth: g?.growth ?? null,
+      streak: g?.streakInfo?.streak ?? 0,
+      isSuperstar: superstarIds.has(d.student.id),
+      isPersonalBest: personalBestIds.has(d.student.id),
+    });
+  });
+  // Alphabetical within a tier, deliberately NOT sorted by score -- a
+  // tier is already an absolute bar (principle: never a single ranked
+  // ladder), so ordering by exact standing inside it would just quietly
+  // reintroduce a rank.
+  byTier.forEach((tier) => tier.sort((a, b) => a.student.name.localeCompare(b.student.name)));
+
+  if (divisions.length === 0) return <p className="muted">No entries yet this week.</p>;
+
+  return (
+    <div>
+      {byTier.map((tierRows, tierIndex) =>
+        tierRows.length === 0 ? null : (
+          <div key={tierIndex} style={{ marginBottom: 18 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: TIER_COLORS[tierIndex], marginBottom: 8 }}>
+              {TIER_EMOJI[tierIndex]} {TIER_LABELS[tierIndex]}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
+              {tierRows.map((r) => (
+                <button
+                  key={r.student.id}
+                  type="button"
+                  onClick={() => onCardClick(r.student.id)}
+                  style={{
+                    textAlign: "left",
+                    border: "1px solid var(--card-border)",
+                    borderTop: `3px solid ${TIER_COLORS[tierIndex]}`,
+                    borderRadius: "var(--radius-md)",
+                    padding: "10px 12px",
+                    background: "var(--card-bg)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 4 }}>{r.student.name}</div>
+                  <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                    {r.streak > 0 && <span style={{ fontSize: 11.5 }} title={`${r.streak}-week streak`}>🔥{r.streak}</span>}
+                    {typeof r.growth === "number" && r.growth > 0 && (
+                      <span style={{ fontSize: 11.5, color: "var(--green)" }} title="Growth vs. own average">
+                        ▲{r.growth.toFixed(0)}
+                      </span>
+                    )}
+                    {r.isSuperstar && <span style={{ fontSize: 11.5 }} title="Perfect week">⭐</span>}
+                    {r.isPersonalBest && <span style={{ fontSize: 11.5 }} title="New personal best">🏆</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
 
 const QUICK_ADJUST_AMOUNTS = [-1, 1, 5, 10];
 
@@ -37,7 +118,7 @@ export default function ProjectorBoard() {
   const latestWeek = weeks[weeks.length - 1];
   const latestWeekId = latestWeek?.id;
   const activeStudents = students.filter((s) => s.active);
-  const [view, setView] = useState("growth");
+  const [view, setView] = useState("everyone");
   const [sessionFilter, setSessionFilter] = useState(null); // null = not yet chosen by the teacher
 
   // Live/inline score editing right from the leaderboard row — for fixing
@@ -349,10 +430,21 @@ export default function ProjectorBoard() {
           </nav>
         </div>
         <p className="muted" style={{ marginBottom: 10 }}>
-          Growth (vs. each student's own 4-week average) shows in every view below, so a
-          student who was behind and bounced back this week gets noticed no matter how
-          you're looking at the board.
+          Tap a student for the full breakdown and to edit their week.
         </p>
+
+        {view === "everyone" && (
+          <EveryoneView
+            divisions={divisions}
+            growthRows={growthRows}
+            personalBests={personalBests}
+            superstarsThisWeek={superstarsThisWeek}
+            onCardClick={(studentId) => {
+              setView("division");
+              startEdit(studentId);
+            }}
+          />
+        )}
 
         {view === "division" && (
           <DivisionView
@@ -724,7 +816,12 @@ function GrowthView({
   const sorted = [...rows].sort((a, b) => (b.growth ?? -Infinity) - (a.growth ?? -Infinity));
   return sorted.map((r, i) => (
     <div key={r.student.id} className={`leader-row ${i === 0 ? "rank-1" : ""}`}>
-      <div className="rank-num">{i + 1}</div>
+      {/* Only the top 3 get a literal rank number -- past that, this is a
+          full class-wide list sorted worst-to-best, and numbering every
+          single row would put someone at a public "last place" here every
+          week, the exact thing the League tiers above are built to avoid.
+          Everyone still sees their own growth number either way. */}
+      <div className="rank-num">{i < 3 ? i + 1 : ""}</div>
       <div className="avatar">{initials(r.student.name)}</div>
       <div className="leader-name">{r.student.name}</div>
       <SuperstarBadge count={r.superstars} />
@@ -773,7 +870,7 @@ function StreakView({
   const sorted = [...rows].sort((a, b) => b.streakInfo.streak - a.streakInfo.streak);
   return sorted.map((r, i) => (
     <div key={r.student.id} className={`leader-row ${i === 0 ? "rank-1" : ""}`}>
-      <div className="rank-num">{i + 1}</div>
+      <div className="rank-num">{i < 3 ? i + 1 : ""}</div>
       <div className="avatar">{initials(r.student.name)}</div>
       <div className="leader-name">{r.student.name}</div>
       <SuperstarBadge count={r.superstars} />

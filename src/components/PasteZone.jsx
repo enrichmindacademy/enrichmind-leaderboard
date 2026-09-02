@@ -25,8 +25,12 @@ export default function PasteZone({ label, file, onChange }) {
 
   return (
     <div>
-      <label className="muted">{label}</label>
-      <br />
+      {label && (
+        <>
+          <label className="muted" style={{ fontSize: 12 }}>{label}</label>
+          <br />
+        </>
+      )}
       <div
         tabIndex={0}
         onPaste={handlePaste}
@@ -55,10 +59,10 @@ export default function PasteZone({ label, file, onChange }) {
             </button>
           </span>
         ) : (
-          <span className="muted" style={{ fontSize: 12.5 }}>
-            Click here and press <strong>Ctrl+V</strong> to paste a copied screenshot, or{" "}
+          <span className="muted" style={{ fontSize: 12 }}>
+            <strong>Ctrl+V</strong> or{" "}
             <label style={{ textDecoration: "underline", cursor: "pointer" }}>
-              choose a file
+              choose file
               <input
                 type="file"
                 accept="image/*"

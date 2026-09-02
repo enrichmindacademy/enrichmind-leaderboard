@@ -19,8 +19,12 @@ export default function CsvDropZone({ label, file, onChange }) {
 
   return (
     <div>
-      <label className="muted">{label}</label>
-      <br />
+      {label && (
+        <>
+          <label className="muted" style={{ fontSize: 12 }}>{label}</label>
+          <br />
+        </>
+      )}
       <div
         tabIndex={0}
         onDrop={handleDrop}
@@ -48,10 +52,10 @@ export default function CsvDropZone({ label, file, onChange }) {
             </button>
           </span>
         ) : (
-          <span className="muted" style={{ fontSize: 12.5 }}>
-            Drop the exported .csv here, or{" "}
+          <span className="muted" style={{ fontSize: 12 }}>
+            Drop .csv or{" "}
             <label style={{ textDecoration: "underline", cursor: "pointer" }}>
-              choose a file
+              choose file
               <input
                 type="file"
                 accept=".csv,text/csv"
